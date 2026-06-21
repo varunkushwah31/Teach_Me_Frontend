@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, X, CloudUpload, Clock, File as FileIcon } from 'lucide-react';
+import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, X, CloudUpload, Clock, File as FileIcon, Search } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { uploadDocument, getDocumentHistory, type DocumentHistoryDTO } from '../services/api';
+import { uploadDocument, getDocumentHistory, searchDocumentHistory, type DocumentHistoryDTO } from '../services/api';
 
 const UploadPage: React.FC = () => {
   const { token } = useAuth();
@@ -10,39 +10,43 @@ const UploadPage: React.FC = () => {
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
 
-  // History State
+  // History & Search State
   const [documents, setDocuments] = useState<DocumentHistoryDTO[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
-
-  // ✅ The Declarative Fetch Trigger
+  const [searchQuery, setSearchQuery] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ✅ All data synchronization is now safely contained purely within the Effect
+  // ✅ Combined Fetch & Search Logic
   useEffect(() => {
     if (!token) return;
 
     let isMounted = true;
     setLoadingHistory(true);
 
-    // Using standard Promise chains avoids the async/await synchronous linting traps
-    getDocumentHistory(token, 0, 20)
+    // If there's a query, use the search API. Otherwise, get standard history.
+    const fetchPromise = searchQuery.trim()
+        ? searchDocumentHistory(token, searchQuery, 0, 20)
+        : getDocumentHistory(token, 0, 20);
+
+    fetchPromise
         .then((res) => {
           if (isMounted) setDocuments(res.content);
         })
-        .catch((err) => {
-          console.error("Failed to fetch documents:", err);
-        })
+        .catch((err) => console.error("Failed to fetch documents:", err))
         .finally(() => {
           if (isMounted) setLoadingHistory(false);
         });
 
-    // Cleanup function prevents state updates if the component unmounts mid-fetch
-    return () => {
-      isMounted = false;
-    };
-  }, [token, refreshKey]);
+    return () => { isMounted = false; };
+  }, [token, refreshKey, searchQuery]); // Re-runs when search query changes
+
+  // ✅ Debounce the search input so we don't hammer the API on every keystroke
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setSearchQuery(value);
+  };
 
   const handleFile = useCallback((f: File | null | undefined) => {
     if (f?.type === 'application/pdf') {
@@ -68,10 +72,8 @@ const UploadPage: React.FC = () => {
       await uploadDocument(token, file, category, `upload-${crypto.randomUUID()}`);
       setFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
-
-      // ✅ Update the trigger to command the useEffect to fetch fresh data
+      setSearchQuery(''); // Clear search to see the new file
       setRefreshKey((prev) => prev + 1);
-
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Upload failed');
     } finally {
@@ -86,29 +88,16 @@ const UploadPage: React.FC = () => {
   };
 
   let dropzoneClasses = 'relative cursor-pointer border-2 border-dashed rounded-xl p-6 text-center transition-all h-full flex flex-col items-center justify-center w-full ';
-  if (dragOver) {
-    dropzoneClasses += 'border-emerald-500 bg-emerald-500/5';
-  } else if (file) {
-    dropzoneClasses += 'border-emerald-500/40 bg-emerald-500/5';
-  } else {
-    dropzoneClasses += 'border-slate-700 hover:border-slate-600 bg-slate-900/50';
-  }
+  if (dragOver) dropzoneClasses += 'border-emerald-500 bg-emerald-500/5';
+  else if (file) dropzoneClasses += 'border-emerald-500/40 bg-emerald-500/5';
+  else dropzoneClasses += 'border-slate-700 hover:border-slate-600 bg-slate-900/50';
 
   const renderTableContent = () => {
     if (loadingHistory) {
-      return (
-          <div className="p-8 text-center text-slate-500 flex justify-center">
-            <Loader2 className="w-6 h-6 animate-spin" />
-          </div>
-      );
+      return <div className="p-8 text-center text-slate-500 flex justify-center"><Loader2 className="w-6 h-6 animate-spin" /></div>;
     }
-
     if (documents.length === 0) {
-      return (
-          <div className="p-8 text-center text-slate-500">
-            No documents uploaded yet.
-          </div>
-      );
+      return <div className="p-8 text-center text-slate-500">{searchQuery ? 'No documents match your search.' : 'No documents uploaded yet.'}</div>;
     }
 
     return (
@@ -125,16 +114,16 @@ const UploadPage: React.FC = () => {
           {documents.map((doc) => (
               <tr key={doc.id} className="hover:bg-slate-800/60 transition-colors">
                 <td className="px-6 py-4 flex items-center gap-3">
-                  <FileIcon className="w-4 h-4 text-slate-500" />
+                  <FileIcon className="w-4 h-4 text-slate-500 shrink-0" />
                   <span className="font-medium text-slate-200 truncate max-w-50">{doc.fileName}</span>
                 </td>
-                <td className="px-6 py-4 text-slate-400">{formatSize(doc.fileSize)}</td>
-                <td className="px-6 py-4">
+                <td className="px-6 py-4 text-slate-400 whitespace-nowrap">{formatSize(doc.fileSize)}</td>
+                <td className="px-6 py-4 whitespace-nowrap">
                   {doc.status === 'COMPLETED' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-500/10 text-emerald-400 text-xs font-medium border border-emerald-500/20"><CheckCircle2 className="w-3.5 h-3.5" /> Ready</span>}
                   {doc.status === 'PROCESSING' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-500/10 text-amber-400 text-xs font-medium border border-amber-500/20"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Parsing</span>}
                   {doc.status === 'FAILED' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-red-500/10 text-red-400 text-xs font-medium border border-red-500/20" title={doc.errorMessage}><AlertCircle className="w-3.5 h-3.5" /> Failed</span>}
                 </td>
-                <td className="px-6 py-4 text-slate-400">
+                <td className="px-6 py-4 text-slate-400 whitespace-nowrap">
                   {new Date(doc.createdAt).toLocaleDateString()}
                 </td>
               </tr>
@@ -147,8 +136,6 @@ const UploadPage: React.FC = () => {
   return (
       <div className="flex flex-col h-full bg-slate-900 overflow-y-auto">
         <div className="max-w-4xl mx-auto w-full px-4 py-8 space-y-8">
-
-          {/* Header */}
           <div>
             <div className="flex items-center gap-3 mb-2">
               <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-linear-to-br from-emerald-500/20 to-cyan-500/20 border border-emerald-500/20">
@@ -156,12 +143,9 @@ const UploadPage: React.FC = () => {
               </div>
               <h2 className="text-2xl font-bold text-white">Document Library</h2>
             </div>
-            <p className="text-slate-400 ml-13">
-              Upload PDFs to build your AI knowledge base. Documents are retained securely and isolated to your account.
-            </p>
+            <p className="text-slate-400 ml-13">Upload PDFs to build your AI knowledge base. Documents are retained securely and isolated to your account.</p>
           </div>
 
-          {/* Upload Container */}
           <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-6 space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="md:col-span-1">
@@ -193,13 +177,7 @@ const UploadPage: React.FC = () => {
                       <div className="flex flex-col items-center gap-2">
                         <FileText className="w-8 h-8 text-emerald-400" />
                         <p className="text-white font-medium text-sm">{file.name}</p>
-                        <button
-                            type="button"
-                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setFile(null); }}
-                            className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1"
-                        >
-                          <X className="w-3 h-3" /> Remove
-                        </button>
+                        <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setFile(null); }} className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1"><X className="w-3 h-3" /> Remove</button>
                       </div>
                   ) : (
                       <div className="flex flex-col items-center gap-2">
@@ -211,21 +189,30 @@ const UploadPage: React.FC = () => {
               </div>
             </div>
 
-            <button
-                onClick={() => void handleUpload()}
-                disabled={!file || uploading}
-                className="w-full flex items-center justify-center gap-2 bg-linear-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-semibold py-3 rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-emerald-500/20"
-            >
+            <button onClick={() => void handleUpload()} disabled={!file || uploading} className="w-full flex items-center justify-center gap-2 bg-linear-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-semibold py-3 rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-emerald-500/20">
               {uploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <CloudUpload className="w-5 h-5" />}
               {uploading ? 'Processing & Vectorizing...' : 'Upload to Knowledge Base'}
             </button>
           </div>
 
-          {/* Document History Table */}
           <div>
-            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-              <Clock className="w-5 h-5 text-slate-400" /> Recent Uploads
-            </h3>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Clock className="w-5 h-5 text-slate-400" /> Recent Uploads
+              </h3>
+
+              {/* ✅ Added Search Bar for Documents */}
+              <div className="relative w-full sm:w-64">
+                <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                    type="text"
+                    placeholder="Search files..."
+                    value={searchQuery}
+                    onChange={handleSearchChange}
+                    className="w-full bg-slate-800 border border-slate-700 text-sm text-white rounded-lg pl-9 pr-4 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-slate-500"
+                />
+              </div>
+            </div>
 
             <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl overflow-hidden">
               {renderTableContent()}

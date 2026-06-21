@@ -112,3 +112,21 @@ export async function getChatSessionHistory(token: string, sessionId: string, pa
   if (!res.ok) throw new Error('Failed to fetch session history');
   return res.json();
 }
+
+// Add to Document Endpoints section
+export async function searchDocumentHistory(token: string, query: string, page = 0, size = 20): Promise<PaginatedResponse<DocumentHistoryDTO>> {
+  const res = await fetch(`${API_BASE}/api/history/documents/search?q=${encodeURIComponent(query)}&page=${page}&size=${size}`, {
+    headers: getAuthHeaders(token),
+  });
+  if (!res.ok) throw new Error('Failed to search documents');
+  return res.json();
+}
+
+// Add to Chat Endpoints section
+export async function searchChatHistory(token: string, query: string, page = 0, size = 50): Promise<PaginatedResponse<ChatHistoryDTO>> {
+  const res = await fetch(`${API_BASE}/api/history/chat/search?q=${encodeURIComponent(query)}&page=${page}&size=${size}`, {
+    headers: getAuthHeaders(token),
+  });
+  if (!res.ok) throw new Error('Failed to search chats');
+  return res.json();
+}
