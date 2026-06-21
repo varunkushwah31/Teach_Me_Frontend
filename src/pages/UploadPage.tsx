@@ -1,14 +1,7 @@
-import React, { useState, useRef, useCallback } from 'react';
-import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, X, CloudUpload } from 'lucide-react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, X, CloudUpload, Clock, File as FileIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { uploadDocument } from '../services/api';
-
-interface UploadResult {
-  id: string;
-  fileName: string;
-  status: 'success' | 'error';
-  message: string;
-}
+import { uploadDocument, getDocumentHistory, type DocumentHistoryDTO } from '../services/api';
 
 const UploadPage: React.FC = () => {
   const { token } = useAuth();
@@ -16,50 +9,71 @@ const UploadPage: React.FC = () => {
   const [category, setCategory] = useState('computer-science');
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
-  const [results, setResults] = useState<UploadResult[]>([]);
+
+  // History State
+  const [documents, setDocuments] = useState<DocumentHistoryDTO[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+
+  // ✅ The Declarative Fetch Trigger
+  const [refreshKey, setRefreshKey] = useState(0);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFile = useCallback((f: File | null) => {
-    if (f && f.type === 'application/pdf') {
+  // ✅ All data synchronization is now safely contained purely within the Effect
+  useEffect(() => {
+    if (!token) return;
+
+    let isMounted = true;
+    setLoadingHistory(true);
+
+    // Using standard Promise chains avoids the async/await synchronous linting traps
+    getDocumentHistory(token, 0, 20)
+        .then((res) => {
+          if (isMounted) setDocuments(res.content);
+        })
+        .catch((err) => {
+          console.error("Failed to fetch documents:", err);
+        })
+        .finally(() => {
+          if (isMounted) setLoadingHistory(false);
+        });
+
+    // Cleanup function prevents state updates if the component unmounts mid-fetch
+    return () => {
+      isMounted = false;
+    };
+  }, [token, refreshKey]);
+
+  const handleFile = useCallback((f: File | null | undefined) => {
+    if (f?.type === 'application/pdf') {
       setFile(f);
     } else if (f) {
-      setResults((prev) => [
-        { id: crypto.randomUUID(), fileName: f.name, status: 'error', message: 'Only PDF files are supported' },
-        ...prev,
-      ]);
+      alert('Only PDF files are supported');
     }
   }, []);
 
   const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      setDragOver(false);
-      handleFile(e.dataTransfer.files[0] ?? null);
-    },
-    [handleFile]
+      (e: React.DragEvent) => {
+        e.preventDefault();
+        setDragOver(false);
+        handleFile(e.dataTransfer?.files?.[0]);
+      },
+      [handleFile]
   );
 
   const handleUpload = async () => {
     if (!file || !token) return;
     setUploading(true);
     try {
-      const msg = await uploadDocument(token, file, category);
-      setResults((prev) => [
-        { id: crypto.randomUUID(), fileName: file.name, status: 'success', message: msg || 'Document processed successfully' },
-        ...prev,
-      ]);
+      await uploadDocument(token, file, category, `upload-${crypto.randomUUID()}`);
       setFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
+
+      // ✅ Update the trigger to command the useEffect to fetch fresh data
+      setRefreshKey((prev) => prev + 1);
+
     } catch (err: unknown) {
-      setResults((prev) => [
-        {
-          id: crypto.randomUUID(),
-          fileName: file.name,
-          status: 'error',
-          message: err instanceof Error ? err.message : 'Upload failed',
-        },
-        ...prev,
-      ]);
+      alert(err instanceof Error ? err.message : 'Upload failed');
     } finally {
       setUploading(false);
     }
@@ -71,137 +85,155 @@ const UploadPage: React.FC = () => {
     return (bytes / 1048576).toFixed(1) + ' MB';
   };
 
+  let dropzoneClasses = 'relative cursor-pointer border-2 border-dashed rounded-xl p-6 text-center transition-all h-full flex flex-col items-center justify-center w-full ';
+  if (dragOver) {
+    dropzoneClasses += 'border-emerald-500 bg-emerald-500/5';
+  } else if (file) {
+    dropzoneClasses += 'border-emerald-500/40 bg-emerald-500/5';
+  } else {
+    dropzoneClasses += 'border-slate-700 hover:border-slate-600 bg-slate-900/50';
+  }
+
+  const renderTableContent = () => {
+    if (loadingHistory) {
+      return (
+          <div className="p-8 text-center text-slate-500 flex justify-center">
+            <Loader2 className="w-6 h-6 animate-spin" />
+          </div>
+      );
+    }
+
+    if (documents.length === 0) {
+      return (
+          <div className="p-8 text-center text-slate-500">
+            No documents uploaded yet.
+          </div>
+      );
+    }
+
+    return (
+        <table className="w-full text-left text-sm text-slate-300">
+          <thead className="bg-slate-900/50 text-slate-400">
+          <tr>
+            <th className="px-6 py-4 font-medium">File Name</th>
+            <th className="px-6 py-4 font-medium">Size</th>
+            <th className="px-6 py-4 font-medium">Status</th>
+            <th className="px-6 py-4 font-medium">Uploaded</th>
+          </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-700/50">
+          {documents.map((doc) => (
+              <tr key={doc.id} className="hover:bg-slate-800/60 transition-colors">
+                <td className="px-6 py-4 flex items-center gap-3">
+                  <FileIcon className="w-4 h-4 text-slate-500" />
+                  <span className="font-medium text-slate-200 truncate max-w-50">{doc.fileName}</span>
+                </td>
+                <td className="px-6 py-4 text-slate-400">{formatSize(doc.fileSize)}</td>
+                <td className="px-6 py-4">
+                  {doc.status === 'COMPLETED' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-500/10 text-emerald-400 text-xs font-medium border border-emerald-500/20"><CheckCircle2 className="w-3.5 h-3.5" /> Ready</span>}
+                  {doc.status === 'PROCESSING' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-500/10 text-amber-400 text-xs font-medium border border-amber-500/20"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Parsing</span>}
+                  {doc.status === 'FAILED' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-red-500/10 text-red-400 text-xs font-medium border border-red-500/20" title={doc.errorMessage}><AlertCircle className="w-3.5 h-3.5" /> Failed</span>}
+                </td>
+                <td className="px-6 py-4 text-slate-400">
+                  {new Date(doc.createdAt).toLocaleDateString()}
+                </td>
+              </tr>
+          ))}
+          </tbody>
+        </table>
+    );
+  };
+
   return (
-    <div className="flex flex-col h-full bg-slate-900 overflow-y-auto">
-      <div className="max-w-2xl mx-auto w-full px-4 py-8 space-y-8">
-        {/* Header */}
-        <div>
-          <div className="flex items-center gap-3 mb-2">
-            <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-linear-to-br from-emerald-500/20 to-cyan-500/20 border border-emerald-500/20">
-              <CloudUpload className="w-5 h-5 text-emerald-400" />
+      <div className="flex flex-col h-full bg-slate-900 overflow-y-auto">
+        <div className="max-w-4xl mx-auto w-full px-4 py-8 space-y-8">
+
+          {/* Header */}
+          <div>
+            <div className="flex items-center gap-3 mb-2">
+              <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-linear-to-br from-emerald-500/20 to-cyan-500/20 border border-emerald-500/20">
+                <CloudUpload className="w-5 h-5 text-emerald-400" />
+              </div>
+              <h2 className="text-2xl font-bold text-white">Document Library</h2>
             </div>
-            <h2 className="text-2xl font-bold text-white">Upload Documents</h2>
+            <p className="text-slate-400 ml-13">
+              Upload PDFs to build your AI knowledge base. Documents are retained securely and isolated to your account.
+            </p>
           </div>
-          <p className="text-slate-400 ml-13">
-            Upload PDF documents to build your knowledge base. The AI will process and index them for RAG queries.
-          </p>
-        </div>
 
-        {/* Category */}
-        <div>
-          <label className="block text-sm font-medium text-slate-300 mb-2">Category</label>
-          <select
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            className="w-full bg-slate-800/60 border border-slate-700/60 text-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 transition-all"
-          >
-            <option value="computer-science">Computer Science</option>
-            <option value="mathematics">Mathematics</option>
-            <option value="physics">Physics</option>
-            <option value="general">General</option>
-          </select>
-        </div>
+          {/* Upload Container */}
+          <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-6 space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="md:col-span-1">
+                <label htmlFor="category-select" className="block text-sm font-medium text-slate-300 mb-2">Category</label>
+                <select
+                    id="category-select"
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 text-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 transition-all"
+                >
+                  <option value="computer-science">Computer Science</option>
+                  <option value="mathematics">Mathematics</option>
+                  <option value="physics">Physics</option>
+                  <option value="general">General</option>
+                </select>
+              </div>
 
-        {/* Drop Zone */}
-        <div
-          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={handleDrop}
-          onClick={() => fileInputRef.current?.click()}
-          className={`relative cursor-pointer border-2 border-dashed rounded-2xl p-10 text-center transition-all ${
-            dragOver
-              ? 'border-emerald-500 bg-emerald-500/5'
-              : file
-                ? 'border-emerald-500/40 bg-emerald-500/5'
-                : 'border-slate-700 hover:border-slate-600 bg-slate-800/30 hover:bg-slate-800/50'
-          }`}
-        >
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".pdf"
-            className="hidden"
-            onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
-          />
-
-          {file ? (
-            <div className="flex flex-col items-center gap-3">
-              <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-                <FileText className="w-7 h-7 text-emerald-400" />
-              </div>
-              <div>
-                <p className="text-white font-medium">{file.name}</p>
-                <p className="text-slate-500 text-sm">{formatSize(file.size)}</p>
-              </div>
-              <button
-                onClick={(e) => { e.stopPropagation(); setFile(null); }}
-                className="text-xs text-slate-500 hover:text-red-400 flex items-center gap-1 transition-colors"
-              >
-                <X className="w-3 h-3" /> Remove
-              </button>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center gap-3">
-              <div className="w-14 h-14 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center">
-                <Upload className="w-7 h-7 text-slate-500" />
-              </div>
-              <div>
-                <p className="text-slate-300 font-medium">Drop your PDF here or click to browse</p>
-                <p className="text-slate-600 text-sm mt-1">Maximum file size: 50 MB</p>
+              <div className="md:col-span-2">
+                <button
+                    type="button"
+                    onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                    onDragLeave={() => setDragOver(false)}
+                    onDrop={handleDrop}
+                    onClick={() => fileInputRef.current?.click()}
+                    className={dropzoneClasses}
+                >
+                  <input ref={fileInputRef} type="file" accept=".pdf" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
+                  {file ? (
+                      <div className="flex flex-col items-center gap-2">
+                        <FileText className="w-8 h-8 text-emerald-400" />
+                        <p className="text-white font-medium text-sm">{file.name}</p>
+                        <button
+                            type="button"
+                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setFile(null); }}
+                            className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1"
+                        >
+                          <X className="w-3 h-3" /> Remove
+                        </button>
+                      </div>
+                  ) : (
+                      <div className="flex flex-col items-center gap-2">
+                        <Upload className="w-6 h-6 text-slate-500" />
+                        <p className="text-slate-300 font-medium text-sm">Drop PDF here or click to browse</p>
+                      </div>
+                  )}
+                </button>
               </div>
             </div>
-          )}
-        </div>
 
-        {/* Upload Button */}
-        <button
-          onClick={handleUpload}
-          disabled={!file || uploading}
-          className="w-full flex items-center justify-center gap-2 bg-linear-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-semibold py-3.5 rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30"
-        >
-          {uploading ? (
-            <>
-              <Loader2 className="w-5 h-5 animate-spin" />
-              Processing document...
-            </>
-          ) : (
-            <>
-              <Upload className="w-5 h-5" />
-              Upload &amp; Process
-            </>
-          )}
-        </button>
-
-        {/* Results */}
-        {results.length > 0 && (
-          <div className="space-y-3">
-            <h3 className="text-sm font-medium text-slate-400 uppercase tracking-wider">Upload History</h3>
-            {results.map((r) => (
-              <div
-                key={r.id}
-                className={`flex items-start gap-3 rounded-xl p-4 border ${
-                  r.status === 'success'
-                    ? 'bg-emerald-500/5 border-emerald-500/20'
-                    : 'bg-red-500/5 border-red-500/20'
-                }`}
-              >
-                {r.status === 'success' ? (
-                  <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
-                ) : (
-                  <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
-                )}
-                <div className="min-w-0">
-                  <p className={`font-medium text-sm ${r.status === 'success' ? 'text-emerald-300' : 'text-red-300'}`}>
-                    {r.fileName}
-                  </p>
-                  <p className="text-slate-500 text-xs mt-0.5 truncate">{r.message}</p>
-                </div>
-              </div>
-            ))}
+            <button
+                onClick={() => void handleUpload()}
+                disabled={!file || uploading}
+                className="w-full flex items-center justify-center gap-2 bg-linear-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-semibold py-3 rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-emerald-500/20"
+            >
+              {uploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <CloudUpload className="w-5 h-5" />}
+              {uploading ? 'Processing & Vectorizing...' : 'Upload to Knowledge Base'}
+            </button>
           </div>
-        )}
+
+          {/* Document History Table */}
+          <div>
+            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+              <Clock className="w-5 h-5 text-slate-400" /> Recent Uploads
+            </h3>
+
+            <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl overflow-hidden">
+              {renderTableContent()}
+            </div>
+          </div>
+
+        </div>
       </div>
-    </div>
   );
 };
 
