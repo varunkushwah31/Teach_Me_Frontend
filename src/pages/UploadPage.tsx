@@ -10,7 +10,6 @@ const UploadPage: React.FC = () => {
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
 
-  // History & Search State
   const [documents, setDocuments] = useState<DocumentHistoryDTO[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -18,14 +17,12 @@ const UploadPage: React.FC = () => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ✅ Combined Fetch & Search Logic
   useEffect(() => {
     if (!token) return;
 
     let isMounted = true;
     setLoadingHistory(true);
 
-    // If there's a query, use the search API. Otherwise, get standard history.
     const fetchPromise = searchQuery.trim()
         ? searchDocumentHistory(token, searchQuery, 0, 20)
         : getDocumentHistory(token, 0, 20);
@@ -40,12 +37,10 @@ const UploadPage: React.FC = () => {
         });
 
     return () => { isMounted = false; };
-  }, [token, refreshKey, searchQuery]); // Re-runs when search query changes
+  }, [token, refreshKey, searchQuery]);
 
-  // ✅ Debounce the search input so we don't hammer the API on every keystroke
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    setSearchQuery(value);
+    setSearchQuery(e.target.value);
   };
 
   const handleFile = useCallback((f: File | null | undefined) => {
@@ -56,14 +51,11 @@ const UploadPage: React.FC = () => {
     }
   }, []);
 
-  const handleDrop = useCallback(
-      (e: React.DragEvent) => {
-        e.preventDefault();
-        setDragOver(false);
-        handleFile(e.dataTransfer?.files?.[0]);
-      },
-      [handleFile]
-  );
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    handleFile(e.dataTransfer?.files?.[0]);
+  }, [handleFile]);
 
   const handleUpload = async () => {
     if (!file || !token) return;
@@ -72,7 +64,7 @@ const UploadPage: React.FC = () => {
       await uploadDocument(token, file, category, `upload-${crypto.randomUUID()}`);
       setFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
-      setSearchQuery(''); // Clear search to see the new file
+      setSearchQuery('');
       setRefreshKey((prev) => prev + 1);
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Upload failed');
@@ -87,22 +79,22 @@ const UploadPage: React.FC = () => {
     return (bytes / 1048576).toFixed(1) + ' MB';
   };
 
-  let dropzoneClasses = 'relative cursor-pointer border-2 border-dashed rounded-xl p-6 text-center transition-all h-full flex flex-col items-center justify-center w-full ';
-  if (dragOver) dropzoneClasses += 'border-emerald-500 bg-emerald-500/5';
-  else if (file) dropzoneClasses += 'border-emerald-500/40 bg-emerald-500/5';
-  else dropzoneClasses += 'border-slate-700 hover:border-slate-600 bg-slate-900/50';
+  let dropzoneClasses = 'relative cursor-pointer border border-dashed rounded-xl p-6 text-center transition-all h-full flex flex-col items-center justify-center w-full ';
+  if (dragOver) dropzoneClasses += 'border-[#5b4fff] bg-[#5b4fff]/10';
+  else if (file) dropzoneClasses += 'border-[#5b4fff]/50 bg-[#5b4fff]/5';
+  else dropzoneClasses += 'border-zinc-700 bg-[#1a1a1a]/40 hover:bg-[#1a1a1a]/80 hover:border-zinc-600';
 
   const renderTableContent = () => {
     if (loadingHistory) {
-      return <div className="p-8 text-center text-slate-500 flex justify-center"><Loader2 className="w-6 h-6 animate-spin" /></div>;
+      return <div className="p-8 text-center text-zinc-500 flex justify-center"><Loader2 className="w-6 h-6 animate-spin" /></div>;
     }
     if (documents.length === 0) {
-      return <div className="p-8 text-center text-slate-500">{searchQuery ? 'No documents match your search.' : 'No documents uploaded yet.'}</div>;
+      return <div className="p-8 text-center text-zinc-500">{searchQuery ? 'No documents match your search.' : 'No documents uploaded yet.'}</div>;
     }
 
     return (
-        <table className="w-full text-left text-sm text-slate-300">
-          <thead className="bg-slate-900/50 text-slate-400">
+        <table className="w-full text-left text-sm text-zinc-300">
+          <thead className="bg-[#111111]/80 text-zinc-400 border-b border-zinc-800/50">
           <tr>
             <th className="px-6 py-4 font-medium">File Name</th>
             <th className="px-6 py-4 font-medium">Size</th>
@@ -110,20 +102,20 @@ const UploadPage: React.FC = () => {
             <th className="px-6 py-4 font-medium">Uploaded</th>
           </tr>
           </thead>
-          <tbody className="divide-y divide-slate-700/50">
+          <tbody className="divide-y divide-zinc-800/50">
           {documents.map((doc) => (
-              <tr key={doc.id} className="hover:bg-slate-800/60 transition-colors">
+              <tr key={doc.id} className="hover:bg-zinc-800/30 transition-colors">
                 <td className="px-6 py-4 flex items-center gap-3">
-                  <FileIcon className="w-4 h-4 text-slate-500 shrink-0" />
-                  <span className="font-medium text-slate-200 truncate max-w-50">{doc.fileName}</span>
+                  <FileIcon className="w-4 h-4 text-zinc-500 shrink-0" />
+                  <span className="font-medium text-zinc-200 truncate max-w-50">{doc.fileName}</span>
                 </td>
-                <td className="px-6 py-4 text-slate-400 whitespace-nowrap">{formatSize(doc.fileSize)}</td>
+                <td className="px-6 py-4 text-zinc-400 whitespace-nowrap">{formatSize(doc.fileSize)}</td>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  {doc.status === 'COMPLETED' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-500/10 text-emerald-400 text-xs font-medium border border-emerald-500/20"><CheckCircle2 className="w-3.5 h-3.5" /> Ready</span>}
-                  {doc.status === 'PROCESSING' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-500/10 text-amber-400 text-xs font-medium border border-amber-500/20"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Parsing</span>}
-                  {doc.status === 'FAILED' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-red-500/10 text-red-400 text-xs font-medium border border-red-500/20" title={doc.errorMessage}><AlertCircle className="w-3.5 h-3.5" /> Failed</span>}
+                  {doc.status === 'COMPLETED' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-950/50 text-emerald-400 text-xs font-medium border border-emerald-900/50"><CheckCircle2 className="w-3.5 h-3.5" /> Ready</span>}
+                  {doc.status === 'PROCESSING' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-950/50 text-amber-400 text-xs font-medium border border-amber-900/50"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Parsing</span>}
+                  {doc.status === 'FAILED' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-red-950/50 text-red-400 text-xs font-medium border border-red-900/50" title={doc.errorMessage}><AlertCircle className="w-3.5 h-3.5" /> Failed</span>}
                 </td>
-                <td className="px-6 py-4 text-slate-400 whitespace-nowrap">
+                <td className="px-6 py-4 text-zinc-400 whitespace-nowrap">
                   {new Date(doc.createdAt).toLocaleDateString()}
                 </td>
               </tr>
@@ -134,27 +126,27 @@ const UploadPage: React.FC = () => {
   };
 
   return (
-      <div className="flex flex-col h-full bg-slate-900 overflow-y-auto">
+      <div className="flex flex-col h-full bg-[#0a0a0a] overflow-y-auto">
         <div className="max-w-4xl mx-auto w-full px-4 py-8 space-y-8">
           <div>
             <div className="flex items-center gap-3 mb-2">
-              <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-linear-to-br from-emerald-500/20 to-cyan-500/20 border border-emerald-500/20">
-                <CloudUpload className="w-5 h-5 text-emerald-400" />
+              <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-linear-to-br from-[#5b4fff]/20 to-[#968fff]/20 border border-[#5b4fff]/20">
+                <CloudUpload className="w-5 h-5 text-[#968fff]" />
               </div>
-              <h2 className="text-2xl font-bold text-white">Document Library</h2>
+              <h2 className="text-2xl font-bold text-white tracking-tight">Document Library</h2>
             </div>
-            <p className="text-slate-400 ml-13">Upload PDFs to build your AI knowledge base. Documents are retained securely and isolated to your account.</p>
+            <p className="text-zinc-400 ml-13">Upload PDFs to build your AI knowledge base. Documents are retained securely and isolated to your account.</p>
           </div>
 
-          <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-6 space-y-6">
+          <div className="bg-[#0a0a0a]/60 backdrop-blur-2xl border border-zinc-800/50 shadow-2xl rounded-2xl p-6 space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="md:col-span-1">
-                <label htmlFor="category-select" className="block text-sm font-medium text-slate-300 mb-2">Category</label>
+                <label htmlFor="category-select" className="block text-sm font-medium text-zinc-300 mb-2">Category</label>
                 <select
                     id="category-select"
                     value={category}
                     onChange={(e) => setCategory(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 text-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 transition-all"
+                    className="w-full bg-[#1a1a1a] border border-zinc-800/80 text-zinc-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-[#5b4fff]/50 transition-all"
                 >
                   <option value="computer-science">Computer Science</option>
                   <option value="mathematics">Mathematics</option>
@@ -175,21 +167,21 @@ const UploadPage: React.FC = () => {
                   <input ref={fileInputRef} type="file" accept=".pdf" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
                   {file ? (
                       <div className="flex flex-col items-center gap-2">
-                        <FileText className="w-8 h-8 text-emerald-400" />
-                        <p className="text-white font-medium text-sm">{file.name}</p>
+                        <FileText className="w-8 h-8 text-[#968fff]" />
+                        <p className="text-white tracking-tight font-medium text-sm">{file.name}</p>
                         <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setFile(null); }} className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1"><X className="w-3 h-3" /> Remove</button>
                       </div>
                   ) : (
                       <div className="flex flex-col items-center gap-2">
-                        <Upload className="w-6 h-6 text-slate-500" />
-                        <p className="text-slate-300 font-medium text-sm">Drop PDF here or click to browse</p>
+                        <Upload className="w-6 h-6 text-zinc-500" />
+                        <p className="text-zinc-300 font-medium text-sm">Drop PDF here or click to browse</p>
                       </div>
                   )}
                 </button>
               </div>
             </div>
 
-            <button onClick={() => void handleUpload()} disabled={!file || uploading} className="w-full flex items-center justify-center gap-2 bg-linear-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-semibold py-3 rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-emerald-500/20">
+            <button onClick={() => void handleUpload()} disabled={!file || uploading} className="w-full flex items-center justify-center gap-2 bg-[#5b4fff] hover:bg-[#5b4fff]/90 text-white font-semibold py-3 rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed border border-[#968fff]/20 shadow-lg shadow-[#5b4fff]/10">
               {uploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <CloudUpload className="w-5 h-5" />}
               {uploading ? 'Processing & Vectorizing...' : 'Upload to Knowledge Base'}
             </button>
@@ -197,24 +189,25 @@ const UploadPage: React.FC = () => {
 
           <div>
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
-              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-                <Clock className="w-5 h-5 text-slate-400" /> Recent Uploads
+              <h3 className="text-lg font-semibold text-white tracking-tight flex items-center gap-2">
+                <Clock className="w-5 h-5 text-zinc-400" /> Recent Uploads
               </h3>
 
-              {/* ✅ Added Search Bar for Documents */}
               <div className="relative w-full sm:w-64">
-                <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                <label htmlFor="doc-search" className="sr-only">Search files</label>
+                <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
+                    id="doc-search"
                     type="text"
                     placeholder="Search files..."
                     value={searchQuery}
                     onChange={handleSearchChange}
-                    className="w-full bg-slate-800 border border-slate-700 text-sm text-white rounded-lg pl-9 pr-4 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-slate-500"
+                    className="w-full bg-[#111111]/85 border border-zinc-800/60 text-sm text-zinc-100 rounded-lg pl-9 pr-4 py-2 focus:outline-none focus:ring-1 focus:ring-[#5b4fff]/50 placeholder-zinc-600"
                 />
               </div>
             </div>
 
-            <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl overflow-hidden">
+            <div className="bg-[#0a0a0a]/60 backdrop-blur-2xl border border-zinc-800/50 shadow-2xl rounded-2xl overflow-hidden">
               {renderTableContent()}
             </div>
           </div>
