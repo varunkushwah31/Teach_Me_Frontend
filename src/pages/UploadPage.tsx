@@ -20,6 +20,7 @@ import {
   searchDocumentHistory,
   generateSummary,
   generateQuiz,
+  getSummary, // ✅ Imported getSummary
   type DocumentHistoryDTO
 } from '../services/api';
 
@@ -35,13 +36,15 @@ const UploadPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
 
+  // State for the Summary Modal
+  const [activeSummary, setActiveSummary] = useState<string | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!token) return;
 
     let isMounted = true;
-    setLoadingHistory(true);
 
     const fetchPromise = searchQuery.trim()
         ? searchDocumentHistory(token, searchQuery, 0, 20)
@@ -51,7 +54,10 @@ const UploadPage: React.FC = () => {
         .then((res) => {
           if (isMounted) setDocuments(res.content);
         })
-        .catch((err) => console.error("Failed to fetch documents:", err))
+        .catch((err: unknown) => {
+          // ✅ Handled the error properly
+          console.error("Failed to fetch documents:", err instanceof Error ? err.message : String(err));
+        })
         .finally(() => {
           if (isMounted) setLoadingHistory(false);
         });
@@ -85,6 +91,8 @@ const UploadPage: React.FC = () => {
       setFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
       setSearchQuery('');
+      // ✅ Trigger a refresh, which will automatically show the loading spinner via the useEffect
+      setLoadingHistory(true);
       setRefreshKey((prev) => prev + 1);
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Upload failed');
@@ -98,8 +106,20 @@ const UploadPage: React.FC = () => {
     try {
       await generateSummary(token, docId);
       alert('Summary generation started in the background!');
-    } catch (err) {
+    } catch (err: unknown) {
+      console.error(err); // ✅ Logged the error
       alert('Failed to start summary generation');
+    }
+  };
+
+  const handleViewSummary = async (docId: number) => {
+    if (!token) return;
+    try {
+      const summaryData = await getSummary(token, docId);
+      setActiveSummary(summaryData.executiveSummary);
+    } catch (err: unknown) {
+      console.error(err); // ✅ Logged the error
+      alert("Summary not ready yet. Please generate it first.");
     }
   };
 
@@ -108,7 +128,8 @@ const UploadPage: React.FC = () => {
     try {
       await generateQuiz(token, docId);
       alert('Quiz generated successfully! Check the study tab soon.');
-    } catch (err) {
+    } catch (err: unknown) {
+      console.error(err); // ✅ Logged the error
       alert('Failed to generate quiz');
     }
   };
@@ -169,6 +190,16 @@ const UploadPage: React.FC = () => {
                         >
                           <BookType className="w-4 h-4" />
                         </button>
+
+                        {/* ✅ NEW: Button to actually view the generated summary */}
+                        <button
+                            onClick={() => handleViewSummary(doc.id)}
+                            className="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-emerald-400 transition-colors"
+                            title="View Summary"
+                        >
+                          <Search className="w-4 h-4" />
+                        </button>
+
                         <button
                             onClick={() => handleGenerateQuiz(doc.id)}
                             className="p-2 bg-[#5b4fff]/20 hover:bg-[#5b4fff]/40 text-[#968fff] rounded-lg transition-colors border border-[#5b4fff]/30"
@@ -187,7 +218,7 @@ const UploadPage: React.FC = () => {
   };
 
   return (
-      <div className="flex flex-col h-full bg-[#0a0a0a] overflow-y-auto">
+      <div className="flex flex-col h-full bg-[#0a0a0a] overflow-y-auto relative">
         <div className="max-w-4xl mx-auto w-full px-4 py-8 space-y-8">
           <div>
             <div className="flex items-center gap-3 mb-2">
@@ -272,8 +303,28 @@ const UploadPage: React.FC = () => {
               {renderTableContent()}
             </div>
           </div>
-
         </div>
+
+        {/* ✅ NEW: Render Summary Modal if active */}
+        {activeSummary && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+              <div className="bg-[#111111] border border-zinc-800 rounded-2xl p-8 max-w-2xl w-full shadow-2xl relative">
+                <button onClick={() => setActiveSummary(null)} className="absolute top-4 right-4 text-zinc-500 hover:text-white transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+                <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-3">
+                  <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-linear-to-br from-[#5b4fff]/20 to-[#968fff]/20 border border-[#5b4fff]/20">
+                    <BookType className="w-4 h-4 text-[#968fff]" />
+                  </div>
+                  Executive Summary
+                </h3>
+                <div className="text-zinc-300 leading-relaxed text-sm whitespace-pre-wrap max-h-[60vh] overflow-y-auto pr-2">
+                  {activeSummary}
+                </div>
+              </div>
+            </div>
+        )}
+
       </div>
   );
 };

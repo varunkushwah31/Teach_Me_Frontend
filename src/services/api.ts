@@ -6,7 +6,7 @@ export function getAuthHeaders(token: string): Record<string, string> {
   };
 }
 
-// --- DTO Interfaces ---
+// DTO Interfaces
 
 export interface PaginatedResponse<T> {
   content: T[];
@@ -44,93 +44,6 @@ export interface ChatHistoryDTO {
   documentName?: string;
 }
 
-// --- Auth Endpoints ---
-
-export async function login(email: string, password: string): Promise<{ token: string }> {
-  const res = await fetch(`${API_BASE}/api/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  });
-  if (!res.ok) throw new Error((await res.text()) || 'Login failed');
-  return res.json();
-}
-
-export async function register(email: string, password: string): Promise<{ token: string }> {
-  const res = await fetch(`${API_BASE}/api/auth/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  });
-  if (!res.ok) throw new Error((await res.text()) || 'Registration failed');
-  return res.json();
-}
-
-// --- Document Endpoints ---
-
-export async function uploadDocument(token: string, file: File, category: string, chatId: string): Promise<string> {
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('category', category);
-  formData.append('chatId', chatId);
-
-  const res = await fetch(`${API_BASE}/api/documents/upload`, {
-    method: 'POST',
-    headers: getAuthHeaders(token),
-    body: formData,
-  });
-  if (!res.ok) throw new Error((await res.text()) || 'Upload failed');
-  return res.text();
-}
-
-export async function getDocumentHistory(token: string, page = 0, size = 20): Promise<PaginatedResponse<DocumentHistoryDTO>> {
-  const res = await fetch(`${API_BASE}/api/history/documents?page=${page}&size=${size}`, {
-    headers: getAuthHeaders(token),
-  });
-  if (!res.ok) throw new Error('Failed to fetch document history');
-  return res.json();
-}
-
-// --- Chat Endpoints ---
-
-export function getChatStreamUrl(): string {
-  return '/api/chat/ask/stream';
-}
-
-export async function getRecentChats(token: string, page = 0, size = 50): Promise<PaginatedResponse<ChatHistoryDTO>> {
-  const res = await fetch(`${API_BASE}/api/history/chats?page=${page}&size=${size}`, {
-    headers: getAuthHeaders(token),
-  });
-  if (!res.ok) throw new Error('Failed to fetch chat history');
-  return res.json();
-}
-
-export async function getChatSessionHistory(token: string, sessionId: string, page = 0, size = 50): Promise<PaginatedResponse<ChatHistoryDTO>> {
-  const res = await fetch(`${API_BASE}/api/history/chats/session/${sessionId}?page=${page}&size=${size}&direction=ASC`, {
-    headers: getAuthHeaders(token),
-  });
-  if (!res.ok) throw new Error('Failed to fetch session history');
-  return res.json();
-}
-
-// Add to Document Endpoints section
-export async function searchDocumentHistory(token: string, query: string, page = 0, size = 20): Promise<PaginatedResponse<DocumentHistoryDTO>> {
-  const res = await fetch(`${API_BASE}/api/history/documents/search?q=${encodeURIComponent(query)}&page=${page}&size=${size}`, {
-    headers: getAuthHeaders(token),
-  });
-  if (!res.ok) throw new Error('Failed to search documents');
-  return res.json();
-}
-
-// Add to Chat Endpoints section
-export async function searchChatHistory(token: string, query: string, page = 0, size = 50): Promise<PaginatedResponse<ChatHistoryDTO>> {
-  const res = await fetch(`${API_BASE}/api/history/chat/search?q=${encodeURIComponent(query)}&page=${page}&size=${size}`, {
-    headers: getAuthHeaders(token),
-  });
-  if (!res.ok) throw new Error('Failed to search chats');
-  return res.json();
-}
-
 export interface DocumentSummaryDTO {
   id: number;
   documentId: number;
@@ -162,6 +75,25 @@ export interface QuizDTO {
   documentName: string;
 }
 
+export interface QuizFeedbackDTO {
+  questionIndex: number;
+  questionText: string;
+  userAnswer: number;
+  correctAnswer: number;
+  isCorrect: boolean;
+  explanation: string;
+}
+
+export interface QuizResponseDTO {
+  quizId: number;
+  userAnswers: number[];
+  totalQuestions: number;
+  correctAnswers: number;
+  score: number;
+  passed: boolean;
+  feedback?: QuizFeedbackDTO[];
+}
+
 export interface FlashcardDTO {
   id: number;
   front: string;
@@ -176,7 +108,95 @@ export interface FlashcardDTO {
   documentName?: string;
 }
 
-// --- Summary Endpoints ---
+
+// Auth Endpoints
+
+export async function login(email: string, password: string): Promise<{ token: string }> {
+  const res = await fetch(`${API_BASE}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) throw new Error((await res.text()) || 'Login failed');
+  return res.json();
+}
+
+export async function register(email: string, password: string): Promise<{ token: string }> {
+  const res = await fetch(`${API_BASE}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) throw new Error((await res.text()) || 'Registration failed');
+  return res.json();
+}
+
+// Document Endpoints
+
+
+export async function uploadDocument(token: string, file: File, category: string, chatId: string): Promise<string> {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('category', category);
+  formData.append('chatId', chatId);
+
+  const res = await fetch(`${API_BASE}/api/documents/upload`, {
+    method: 'POST',
+    headers: getAuthHeaders(token),
+    body: formData,
+  });
+  if (!res.ok) throw new Error((await res.text()) || 'Upload failed');
+  return res.text();
+}
+
+export async function getDocumentHistory(token: string, page = 0, size = 20): Promise<PaginatedResponse<DocumentHistoryDTO>> {
+  const res = await fetch(`${API_BASE}/api/history/documents?page=${page}&size=${size}`, {
+    headers: getAuthHeaders(token),
+  });
+  if (!res.ok) throw new Error('Failed to fetch document history');
+  return res.json();
+}
+
+export async function searchDocumentHistory(token: string, query: string, page = 0, size = 20): Promise<PaginatedResponse<DocumentHistoryDTO>> {
+  const res = await fetch(`${API_BASE}/api/history/documents/search?q=${encodeURIComponent(query)}&page=${page}&size=${size}`, {
+    headers: getAuthHeaders(token),
+  });
+  if (!res.ok) throw new Error('Failed to search documents');
+  return res.json();
+}
+
+// Chat Endpoints
+
+export function getChatStreamUrl(): string {
+  return '/api/chat/ask/stream';
+}
+
+export async function getRecentChats(token: string, page = 0, size = 50): Promise<PaginatedResponse<ChatHistoryDTO>> {
+  const res = await fetch(`${API_BASE}/api/history/chats?page=${page}&size=${size}`, {
+    headers: getAuthHeaders(token),
+  });
+  if (!res.ok) throw new Error('Failed to fetch chat history');
+  return res.json();
+}
+
+export async function getChatSessionHistory(token: string, sessionId: string, page = 0, size = 50): Promise<PaginatedResponse<ChatHistoryDTO>> {
+  const res = await fetch(`${API_BASE}/api/history/chats/session/${sessionId}?page=${page}&size=${size}&direction=ASC`, {
+    headers: getAuthHeaders(token),
+  });
+  if (!res.ok) throw new Error('Failed to fetch session history');
+  return res.json();
+}
+
+export async function searchChatHistory(token: string, query: string, page = 0, size = 50): Promise<PaginatedResponse<ChatHistoryDTO>> {
+  const res = await fetch(`${API_BASE}/api/history/chat/search?q=${encodeURIComponent(query)}&page=${page}&size=${size}`, {
+    headers: getAuthHeaders(token),
+  });
+  if (!res.ok) throw new Error('Failed to search chats');
+  return res.json();
+}
+
+// Summary Endpoints
+
 export async function generateSummary(token: string, documentId: number): Promise<{ message: string }> {
   const res = await fetch(`${API_BASE}/api/summary/generate/${documentId}`, {
     method: 'POST',
@@ -192,7 +212,9 @@ export async function getSummary(token: string, documentId: number): Promise<Doc
   return res.json();
 }
 
-// --- Quiz Endpoints ---
+
+// Quiz Endpoints
+
 export async function generateQuiz(token: string, documentId: number): Promise<QuizDTO> {
   const res = await fetch(`${API_BASE}/api/quiz/generate/${documentId}`, {
     method: 'POST',
@@ -208,7 +230,8 @@ export async function getDocumentQuizzes(token: string, documentId: number): Pro
   return res.json();
 }
 
-export async function submitQuiz(token: string, quizId: number, answers: number[]): Promise<any> {
+// Note: Ensure this is the ONLY submitQuiz function in the file
+export async function submitQuiz(token: string, quizId: number, answers: number[]): Promise<QuizResponseDTO> {
   const res = await fetch(`${API_BASE}/api/quiz/submit/${quizId}`, {
     method: 'POST',
     headers: { ...getAuthHeaders(token), 'Content-Type': 'application/json' },
@@ -218,7 +241,8 @@ export async function submitQuiz(token: string, quizId: number, answers: number[
   return res.json();
 }
 
-// --- Flashcard Endpoints ---
+// Flashcard Endpoints
+
 export async function createFlashcard(token: string, data: { front: string; back: string; sourceContent?: string; deckName?: string; documentId?: number }): Promise<FlashcardDTO> {
   const res = await fetch(`${API_BASE}/api/flashcards/create`, {
     method: 'POST',

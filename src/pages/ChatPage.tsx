@@ -1,13 +1,23 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import ReactMarkdown from 'react-markdown';
-import { Send, Bot, User, Sparkles, MessageSquare, Plus, Search } from 'lucide-react';
+import {
+    Send,
+    Bot,
+    User,
+    Sparkles,
+    MessageSquare,
+    Plus,
+    Search,
+    PlusCircle
+} from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import {
     getChatStreamUrl,
     getRecentChats,
     getChatSessionHistory,
     searchChatHistory,
+    createFlashcard,
     type ChatHistoryDTO
 } from '../services/api';
 
@@ -133,7 +143,8 @@ const ChatPage: React.FC = () => {
                     Authorization: `Bearer ${token}`,
                     Accept: 'text/event-stream',
                 },
-                body: JSON.stringify({ question: userMessage.text, chatId: currentSessionId, category }),
+                // Backend no longer uses category for retrieval, but we keep it in state for the Flashcards!
+                body: JSON.stringify({ question: userMessage.text, chatId: currentSessionId }),
                 signal: ctrl.signal,
                 onmessage(event) { handleStreamMessage(event.data, aiMessageId); },
                 onclose() { setIsStreaming(false); },
@@ -152,6 +163,22 @@ const ChatPage: React.FC = () => {
                 setMessages((prev) => [...prev, { id: crypto.randomUUID(), text: '⚠️ Failed to connect to the AI.', sender: 'ai', timestamp: new Date() }]);
             }
             setIsStreaming(false);
+        }
+    };
+
+    const handleSaveFlashcard = async (text: string) => {
+        if(!token) return;
+        try {
+            await createFlashcard(token, {
+                front: "AI Concept Review",
+                back: text,
+                sourceContent: text,
+                deckName: category
+            });
+            alert(`Saved to ${category} flashcards!`);
+        } catch (err) {
+            console.error("Failed to save flashcard", err);
+            alert("Failed to save flashcard");
         }
     };
 
@@ -218,6 +245,7 @@ const ChatPage: React.FC = () => {
                         <select id="category-select" value={category} onChange={(e) => setCategory(e.target.value)} className="bg-[#1a1a1a] border border-zinc-800/80 text-zinc-300 text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#5b4fff]/50 transition-all">
                             <option value="computer-science">Computer Science</option>
                             <option value="mathematics">Mathematics</option>
+                            <option value="physics">Physics</option>
                             <option value="general">General</option>
                         </select>
                     </div>
@@ -227,18 +255,39 @@ const ChatPage: React.FC = () => {
                     <div className="max-w-3xl mx-auto space-y-6">
                         {messages.length === 0 && (
                             <div className="flex flex-col items-center justify-center h-full min-h-100 text-center">
-                                <div className="w-20 h-20 rounded-2xl bg-linear-to-br from-[#5b4fff]/10 to-[#968fff]/10 border border-[#5b4fff]/20 flex items-center justify-center mb-6"><Bot className="w-10 h-10 text-[#968fff]/60" /></div>
+                                <div className="w-20 h-20 rounded-2xl bg-linear-to-br from-[#5b4fff]/10 to-[#968fff]/10 border border-[#5b4fff]/20 flex items-center justify-center mb-6">
+                                    <Bot className="w-10 h-10 text-[#968fff]/60" />
+                                </div>
                                 <h3 className="text-xl font-semibold text-white tracking-tight mb-2">Start a New Conversation</h3>
                                 <p className="text-zinc-500 max-w-sm">Your chat history is securely saved and isolated.</p>
                             </div>
                         )}
 
                         {messages.map((msg) => (
-                            <div key={msg.id} className={`flex gap-3 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
+                            <div key={msg.id} className={`flex gap-3 group ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
                                 {msg.sender === 'ai' && <div className="shrink-0 w-8 h-8 rounded-lg bg-linear-to-br from-[#5b4fff]/20 to-[#968fff]/20 border border-[#5b4fff]/20 flex items-center justify-center mt-1"><Bot className="w-4 h-4 text-[#968fff]" /></div>}
-                                <div className={`max-w-[75%] rounded-2xl px-4 py-3 shadow-lg ${msg.sender === 'user' ? 'bg-[#5b4fff] text-white rounded-br-md shadow-[#5b4fff]/10' : 'bg-[#1a1a1a] text-zinc-200 border border-zinc-800/50 rounded-bl-md shadow-black/20'}`}>
-                                    {msg.sender === 'ai' ? <div className="prose prose-invert prose-sm max-w-none"><ReactMarkdown>{msg.text || (isStreaming && msg.text === '' ? '...' : '')}</ReactMarkdown></div> : <p className="whitespace-pre-wrap">{msg.text}</p>}
+
+                                <div className={`max-w-[75%] rounded-2xl px-4 py-3 shadow-lg relative ${msg.sender === 'user' ? 'bg-[#5b4fff] text-white rounded-br-md shadow-[#5b4fff]/10' : 'bg-[#1a1a1a] text-zinc-200 border border-zinc-800/50 rounded-bl-md shadow-black/20'}`}>
+                                    {msg.sender === 'ai' ? (
+                                        <div className="prose prose-invert prose-sm max-w-none">
+                                            <ReactMarkdown>{msg.text || (isStreaming && msg.text === '' ? '...' : '')}</ReactMarkdown>
+                                        </div>
+                                    ) : (
+                                        <p className="whitespace-pre-wrap">{msg.text}</p>
+                                    )}
+
+                                    {/* Flashcard Save Button (appears on hover) */}
+                                    {msg.sender === 'ai' && !isStreaming && msg.text && (
+                                        <button
+                                            onClick={() => handleSaveFlashcard(msg.text)}
+                                            className="absolute -right-10 top-2 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 bg-[#1a1a1a] border border-zinc-700 rounded-lg hover:bg-zinc-800 text-emerald-400"
+                                            title="Save as Flashcard"
+                                        >
+                                            <PlusCircle className="w-4 h-4" />
+                                        </button>
+                                    )}
                                 </div>
+
                                 {msg.sender === 'user' && <div className="shrink-0 w-8 h-8 rounded-lg bg-[#5b4fff]/20 border border-[#5b4fff]/20 flex items-center justify-center mt-1"><User className="w-4 h-4 text-[#b4afff]" /></div>}
                             </div>
                         ))}
@@ -249,8 +298,24 @@ const ChatPage: React.FC = () => {
                 <div className="shrink-0 border-t border-zinc-800/60 bg-[#111111]/85 backdrop-blur-xl px-4 py-4">
                     <div className="max-w-3xl mx-auto flex gap-3">
                         <label htmlFor="chat-input" className="sr-only">Type your message</label>
-                        <textarea id="chat-input" ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void handleSend(); }}} disabled={isStreaming} placeholder="Ask a question..." className="flex-1 bg-[#1a1a1a]/80 border border-zinc-800/80 text-white rounded-xl px-4 py-3 resize-none focus:outline-none focus:ring-1 focus:ring-[#5b4fff]/50 transition-all placeholder-zinc-500" style={{ minHeight: '48px', maxHeight: '160px' }} />
-                        <button onClick={() => void handleSend()} disabled={isStreaming || !input.trim()} className="shrink-0 w-12 h-12 rounded-xl bg-[#5b4fff] hover:bg-[#5b4fff]/90 text-white flex items-center justify-center disabled:opacity-40 shadow-lg shadow-[#5b4fff]/20 border border-[#968fff]/20 transition-all"><Send className="w-5 h-5" /></button>
+                        <textarea
+                            id="chat-input"
+                            ref={inputRef}
+                            value={input}
+                            onChange={(e) => setInput(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void handleSend(); }}}
+                            disabled={isStreaming}
+                            placeholder="Ask a question..."
+                            className="flex-1 bg-[#1a1a1a]/80 border border-zinc-800/80 text-white rounded-xl px-4 py-3 resize-none focus:outline-none focus:ring-1 focus:ring-[#5b4fff]/50 transition-all placeholder-zinc-500"
+                            style={{ minHeight: '48px', maxHeight: '160px' }}
+                        />
+                        <button
+                            onClick={() => void handleSend()}
+                            disabled={isStreaming || !input.trim()}
+                            className="shrink-0 w-12 h-12 rounded-xl bg-[#5b4fff] hover:bg-[#5b4fff]/90 text-white flex items-center justify-center disabled:opacity-40 shadow-lg shadow-[#5b4fff]/20 border border-[#968fff]/20 transition-all"
+                        >
+                            <Send className="w-5 h-5" />
+                        </button>
                     </div>
                 </div>
             </div>
