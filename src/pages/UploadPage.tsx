@@ -1,7 +1,27 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, X, CloudUpload, Clock, File as FileIcon, Search } from 'lucide-react';
+import {
+  Upload,
+  FileText,
+  CheckCircle2,
+  AlertCircle,
+  Loader2,
+  X,
+  CloudUpload,
+  Clock,
+  File as FileIcon,
+  Search,
+  BrainCircuit,
+  BookType
+} from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { uploadDocument, getDocumentHistory, searchDocumentHistory, type DocumentHistoryDTO } from '../services/api';
+import {
+  uploadDocument,
+  getDocumentHistory,
+  searchDocumentHistory,
+  generateSummary,
+  generateQuiz,
+  type DocumentHistoryDTO
+} from '../services/api';
 
 const UploadPage: React.FC = () => {
   const { token } = useAuth();
@@ -73,6 +93,26 @@ const UploadPage: React.FC = () => {
     }
   };
 
+  const handleGenerateSummary = async (docId: number) => {
+    if (!token) return;
+    try {
+      await generateSummary(token, docId);
+      alert('Summary generation started in the background!');
+    } catch (err) {
+      alert('Failed to start summary generation');
+    }
+  };
+
+  const handleGenerateQuiz = async (docId: number) => {
+    if (!token) return;
+    try {
+      await generateQuiz(token, docId);
+      alert('Quiz generated successfully! Check the study tab soon.');
+    } catch (err) {
+      alert('Failed to generate quiz');
+    }
+  };
+
   const formatSize = (bytes: number) => {
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
@@ -99,7 +139,8 @@ const UploadPage: React.FC = () => {
             <th className="px-6 py-4 font-medium">File Name</th>
             <th className="px-6 py-4 font-medium">Size</th>
             <th className="px-6 py-4 font-medium">Status</th>
-            <th className="px-6 py-4 font-medium">Uploaded</th>
+            <th className="px-6 py-4 font-medium text-center">Uploaded</th>
+            <th className="px-6 py-4 font-medium text-right">Actions</th>
           </tr>
           </thead>
           <tbody className="divide-y divide-zinc-800/50">
@@ -115,8 +156,28 @@ const UploadPage: React.FC = () => {
                   {doc.status === 'PROCESSING' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-950/50 text-amber-400 text-xs font-medium border border-amber-900/50"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Parsing</span>}
                   {doc.status === 'FAILED' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-red-950/50 text-red-400 text-xs font-medium border border-red-900/50" title={doc.errorMessage}><AlertCircle className="w-3.5 h-3.5" /> Failed</span>}
                 </td>
-                <td className="px-6 py-4 text-zinc-400 whitespace-nowrap">
+                <td className="px-6 py-4 text-zinc-400 whitespace-nowrap text-center">
                   {new Date(doc.createdAt).toLocaleDateString()}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-right">
+                  {doc.status === 'COMPLETED' && (
+                      <div className="flex justify-end gap-2">
+                        <button
+                            onClick={() => handleGenerateSummary(doc.id)}
+                            className="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-300 transition-colors"
+                            title="Generate Summary"
+                        >
+                          <BookType className="w-4 h-4" />
+                        </button>
+                        <button
+                            onClick={() => handleGenerateQuiz(doc.id)}
+                            className="p-2 bg-[#5b4fff]/20 hover:bg-[#5b4fff]/40 text-[#968fff] rounded-lg transition-colors border border-[#5b4fff]/30"
+                            title="Generate Quiz"
+                        >
+                          <BrainCircuit className="w-4 h-4" />
+                        </button>
+                      </div>
+                  )}
                 </td>
               </tr>
           ))}
