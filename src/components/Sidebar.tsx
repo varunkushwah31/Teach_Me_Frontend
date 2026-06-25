@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { MessageSquare, Upload, LogOut, BookOpen, Settings, ChevronLeft, ChevronRight } from 'lucide-react';
+import {MessageSquare, Upload, LogOut, BookOpen, Settings, ChevronLeft, ChevronRight, Layers} from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 interface SidebarProps {
@@ -48,6 +48,13 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
             <Upload className="w-5 h-5 shrink-0" />
             {!collapsed && <span>Upload Documents</span>}
           </NavLink>
+
+          {/* NEW Feature Links */}
+          <NavLink to="/study" className={linkClass} title="Study Flashcards">
+            <Layers className="w-5 h-5 shrink-0" />
+            {!collapsed && <span>Study Deck</span>}
+          </NavLink>
+
           <NavLink to="/settings" className={linkClass} title="Settings">
             <Settings className="w-5 h-5 shrink-0" />
             {!collapsed && <span>Settings</span>}

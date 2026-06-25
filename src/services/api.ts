@@ -130,3 +130,117 @@ export async function searchChatHistory(token: string, query: string, page = 0, 
   if (!res.ok) throw new Error('Failed to search chats');
   return res.json();
 }
+
+export interface DocumentSummaryDTO {
+  id: number;
+  documentId: number;
+  documentName: string;
+  executiveSummary: string;
+  summaryLength: number;
+  wordCount: number;
+  status: string;
+  createdAt: string;
+}
+
+export interface QuizQuestionDTO {
+  id: number;
+  questionText: string;
+  questionOrder: number;
+  options: string[];
+  correctAnswerIndex: number;
+  explanation: string;
+}
+
+export interface QuizDTO {
+  id: number;
+  title: string;
+  description: string;
+  totalQuestions: number;
+  passScore: number;
+  questions: QuizQuestionDTO[];
+  documentId: number;
+  documentName: string;
+}
+
+export interface FlashcardDTO {
+  id: number;
+  front: string;
+  back: string;
+  sourceContent?: string;
+  repetitionCount: number;
+  easeFactor: number;
+  intervalDays: number;
+  nextReviewDate: string;
+  deckName: string;
+  documentId?: number;
+  documentName?: string;
+}
+
+// --- Summary Endpoints ---
+export async function generateSummary(token: string, documentId: number): Promise<{ message: string }> {
+  const res = await fetch(`${API_BASE}/api/summary/generate/${documentId}`, {
+    method: 'POST',
+    headers: getAuthHeaders(token),
+  });
+  if (!res.ok) throw new Error('Failed to generate summary');
+  return res.json();
+}
+
+export async function getSummary(token: string, documentId: number): Promise<DocumentSummaryDTO> {
+  const res = await fetch(`${API_BASE}/api/summary/${documentId}`, { headers: getAuthHeaders(token) });
+  if (!res.ok) throw new Error('Summary not found');
+  return res.json();
+}
+
+// --- Quiz Endpoints ---
+export async function generateQuiz(token: string, documentId: number): Promise<QuizDTO> {
+  const res = await fetch(`${API_BASE}/api/quiz/generate/${documentId}`, {
+    method: 'POST',
+    headers: getAuthHeaders(token),
+  });
+  if (!res.ok) throw new Error('Failed to generate quiz');
+  return res.json();
+}
+
+export async function getDocumentQuizzes(token: string, documentId: number): Promise<QuizDTO[]> {
+  const res = await fetch(`${API_BASE}/api/quiz/document/${documentId}`, { headers: getAuthHeaders(token) });
+  if (!res.ok) throw new Error('Failed to fetch quizzes');
+  return res.json();
+}
+
+export async function submitQuiz(token: string, quizId: number, answers: number[]): Promise<any> {
+  const res = await fetch(`${API_BASE}/api/quiz/submit/${quizId}`, {
+    method: 'POST',
+    headers: { ...getAuthHeaders(token), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ answers }),
+  });
+  if (!res.ok) throw new Error('Failed to submit quiz');
+  return res.json();
+}
+
+// --- Flashcard Endpoints ---
+export async function createFlashcard(token: string, data: { front: string; back: string; sourceContent?: string; deckName?: string; documentId?: number }): Promise<FlashcardDTO> {
+  const res = await fetch(`${API_BASE}/api/flashcards/create`, {
+    method: 'POST',
+    headers: { ...getAuthHeaders(token), 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error('Failed to create flashcard');
+  return res.json();
+}
+
+export async function getDueFlashcards(token: string): Promise<FlashcardDTO[]> {
+  const res = await fetch(`${API_BASE}/api/flashcards/due`, { headers: getAuthHeaders(token) });
+  if (!res.ok) throw new Error('Failed to fetch due flashcards');
+  return res.json();
+}
+
+export async function reviewFlashcard(token: string, flashcardId: number, quality: number): Promise<FlashcardDTO> {
+  const res = await fetch(`${API_BASE}/api/flashcards/${flashcardId}/review`, {
+    method: 'POST',
+    headers: { ...getAuthHeaders(token), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ quality }),
+  });
+  if (!res.ok) throw new Error('Failed to review flashcard');
+  return res.json();
+}
