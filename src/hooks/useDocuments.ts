@@ -7,13 +7,14 @@ import {
     generateSummary,
     generateQuiz,
     getSummary,
-    type DocumentHistoryDTO
+    type DocumentHistoryDTO,
+    type DocumentSummaryDTO,
 } from '../services/api';
 
 export function useDocuments() {
     const { token } = useAuth();
     const [documents, setDocuments] = useState<DocumentHistoryDTO[]>([]);
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
     const fetchDocuments = useCallback(async (searchQuery: string = '') => {
@@ -22,7 +23,7 @@ export function useDocuments() {
         setError(null);
         try {
             const res = searchQuery.trim()
-                ? await searchDocumentHistory(token, searchQuery, 0, 20)
+                ? await searchDocumentHistory(token, searchQuery.trim(), 0, 20)
                 : await getDocumentHistory(token, 0, 20);
             setDocuments(res.content);
         } catch (err: unknown) {
@@ -32,31 +33,25 @@ export function useDocuments() {
         }
     }, [token]);
 
-    const upload = async (file: File, category: string) => {
-        if (!token) return;
-        setLoading(true);
-        try {
-            await uploadDocument(token, file, category, `upload-${crypto.randomUUID()}`);
-            await fetchDocuments(); // Auto-refresh the list
-        } catch (err: unknown) {
-            throw new Error(err instanceof Error ? err.message : 'Upload failed');
-        } finally {
-            setLoading(false);
-        }
+    const upload = async (file: File, category: string): Promise<void> => {
+        if (!token) throw new Error('Not authenticated');
+        await uploadDocument(token, file, category, `upload-${crypto.randomUUID()}`);
+        // Refresh list after a successful upload
+        await fetchDocuments();
     };
 
-    const triggerSummary = async (docId: number) => {
-        if (!token) return;
+    const triggerSummary = async (docId: number): Promise<void> => {
+        if (!token) throw new Error('Not authenticated');
         await generateSummary(token, docId);
     };
 
-    const fetchSummary = async (docId: number) => {
-        if (!token) throw new Error("No token");
-        return await getSummary(token, docId);
+    const fetchSummary = async (docId: number): Promise<DocumentSummaryDTO> => {
+        if (!token) throw new Error('Not authenticated');
+        return getSummary(token, docId);
     };
 
-    const triggerQuiz = async (docId: number) => {
-        if (!token) return;
+    const triggerQuiz = async (docId: number): Promise<void> => {
+        if (!token) throw new Error('Not authenticated');
         await generateQuiz(token, docId);
     };
 
@@ -68,6 +63,6 @@ export function useDocuments() {
         upload,
         triggerSummary,
         fetchSummary,
-        triggerQuiz
+        triggerQuiz,
     };
 }

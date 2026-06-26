@@ -14,31 +14,31 @@ export function useFlashcards() {
             const cards = await getDueFlashcards(token);
             setDueCards(cards);
         } catch (err) {
-            console.error("Failed to fetch flashcards", err);
+            console.error('Failed to fetch flashcards', err);
         } finally {
             setLoading(false);
         }
     }, [token]);
 
+    /**
+     * Submit a quality rating (1/3/5) for a card.
+     * Only removes it from the local state AFTER the server confirms success.
+     * Throws on failure so the caller can show an error without advancing the UI.
+     */
     const reviewCard = async (flashcardId: number, quality: number) => {
-        if (!token) return;
-        try {
-            await reviewFlashcard(token, flashcardId, quality);
-            // Remove the reviewed card from the local state array
-            setDueCards(prev => prev.filter(c => c.id !== flashcardId));
-        } catch (err) {
-            console.error("Failed to submit review", err);
-            throw err;
-        }
+        if (!token) throw new Error('Not authenticated');
+        await reviewFlashcard(token, flashcardId, quality);
+        // Remove from local state only after a successful API response
+        setDueCards(prev => prev.filter(c => c.id !== flashcardId));
     };
 
     const saveNewCard = async (text: string, category: string) => {
-        if (!token) return;
+        if (!token) throw new Error('Not authenticated');
         await createFlashcard(token, {
-            front: "AI Concept Review",
+            front: 'AI Concept Review',
             back: text,
             sourceContent: text,
-            deckName: category
+            deckName: category,
         });
     };
 

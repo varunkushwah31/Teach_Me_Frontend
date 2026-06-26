@@ -12,12 +12,12 @@ import {
     PlusCircle
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useFlashcards } from '../hooks/useFlashcards';
 import {
     getChatStreamUrl,
     getRecentChats,
     getChatSessionHistory,
     searchChatHistory,
-    createFlashcard,
     type ChatHistoryDTO
 } from '../services/api';
 
@@ -36,32 +36,46 @@ interface Session {
 
 const ChatPage: React.FC = () => {
     const { token } = useAuth();
+    // Use the shared hook — category now lives here for flashcard deck naming only
+    const { saveNewCard } = useFlashcards();
 
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [isStreaming, setIsStreaming] = useState(false);
-    const [category, setCategory] = useState('computer-science');
+
+    // this category is only used for flashcard deck labeling, not for the AI request.
+    // It is no longer shown in the chat header — the save popover shows a picker instead.
+    const [flashcardCategory, setFlashcardCategory] = useState('computer-science');
+    const [savingId, setSavingId] = useState<string | null>(null);
+    const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
 
     const [currentSessionId, setCurrentSessionId] = useState<string>(crypto.randomUUID());
     const [historySessions, setHistorySessions] = useState<Session[]>([]);
+    const [debouncedSearch, setDebouncedSearch] = useState('');
     const [sidebarSearch, setSidebarSearch] = useState('');
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const abortRef = useRef<AbortController | null>(null);
+    const prevMessageCount = useRef(0);
+
+    // Debounce sidebar search — prevents an API call on every keystroke
+    useEffect(() => {
+        const id = setTimeout(() => setDebouncedSearch(sidebarSearch), 300);
+        return () => clearTimeout(id);
+    }, [sidebarSearch]);
 
     useEffect(() => {
         if (!token) return;
-
         let isMounted = true;
-        const fetchPromise = sidebarSearch.trim()
-            ? searchChatHistory(token, sidebarSearch.trim(), 0, 50)
+
+        const fetchPromise = debouncedSearch.trim()
+            ? searchChatHistory(token, debouncedSearch.trim(), 0, 50)
             : getRecentChats(token, 0, 50);
 
         fetchPromise
             .then((res) => {
                 if (!isMounted) return;
-
                 const sessionMap = new Map<string, Session>();
                 res.content.forEach((chat: ChatHistoryDTO) => {
                     if (!sessionMap.has(chat.sessionId)) {
@@ -74,12 +88,17 @@ const ChatPage: React.FC = () => {
                 });
                 setHistorySessions(Array.from(sessionMap.values()));
             })
-            .catch((err) => {
-                console.error("Failed to fetch history:", err);
-            });
+            .catch((err) => console.error('Failed to fetch history:', err));
 
         return () => { isMounted = false; };
-    }, [token, sidebarSearch]);
+    }, [token, debouncedSearch]);
+
+    // Abort any in-flight SSE stream when the component unmounts
+    useEffect(() => {
+        return () => {
+            abortRef.current?.abort();
+        };
+    }, []);
 
     const loadSession = async (sessionId: string) => {
         if (!token || isStreaming) return;
@@ -99,17 +118,22 @@ const ChatPage: React.FC = () => {
             });
             setMessages(loadedMessages);
         } catch (err) {
-            console.error("Failed to load session history", err);
+            console.error('Failed to load session history', err);
         }
     };
 
     const createNewSession = () => {
+        abortRef.current?.abort();
         setCurrentSessionId(crypto.randomUUID());
         setMessages([]);
     };
 
+    // Scroll only when a new message is appended, not on any length change
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        if (messages.length > prevMessageCount.current) {
+            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }
+        prevMessageCount.current = messages.length;
     }, [messages.length]);
 
     const handleStreamMessage = useCallback((chunk: string, aiMessageId: string) => {
@@ -123,10 +147,19 @@ const ChatPage: React.FC = () => {
     const handleSend = async () => {
         if (!input.trim() || isStreaming || !token) return;
 
-        const userMessage: Message = { id: crypto.randomUUID(), text: input.trim(), sender: 'user', timestamp: new Date() };
+        const userMessage: Message = {
+            id: crypto.randomUUID(),
+            text: input.trim(),
+            sender: 'user',
+            timestamp: new Date(),
+        };
         const aiMessageId = crypto.randomUUID();
 
-        setMessages((prev) => [...prev, userMessage, { id: aiMessageId, text: '', sender: 'ai', timestamp: new Date() }]);
+        setMessages((prev) => [
+            ...prev,
+            userMessage,
+            { id: aiMessageId, text: '', sender: 'ai', timestamp: new Date() },
+        ]);
         setInput('');
         setIsStreaming(true);
 
@@ -143,7 +176,7 @@ const ChatPage: React.FC = () => {
                     Authorization: `Bearer ${token}`,
                     Accept: 'text/event-stream',
                 },
-                // Backend no longer uses category for retrieval, but we keep it in state for the Flashcards!
+                // category intentionally omitted — backend no longer uses it for retrieval
                 body: JSON.stringify({ question: userMessage.text, chatId: currentSessionId }),
                 signal: ctrl.signal,
                 onmessage(event) { handleStreamMessage(event.data, aiMessageId); },
@@ -157,38 +190,40 @@ const ChatPage: React.FC = () => {
                 }
                 return prev;
             });
-
         } catch (err) {
             if ((err as Error).name !== 'AbortError') {
-                setMessages((prev) => [...prev, { id: crypto.randomUUID(), text: '⚠️ Failed to connect to the AI.', sender: 'ai', timestamp: new Date() }]);
+                setMessages((prev) => [
+                    ...prev,
+                    { id: crypto.randomUUID(), text: '⚠️ Failed to connect to the AI.', sender: 'ai', timestamp: new Date() },
+                ]);
             }
             setIsStreaming(false);
         }
     };
 
-    const handleSaveFlashcard = async (text: string) => {
-        if(!token) return;
+    const handleSaveFlashcard = async (msg: Message) => {
+        if (!token || savingId === msg.id) return;
+        setSavingId(msg.id);
         try {
-            await createFlashcard(token, {
-                front: "AI Concept Review",
-                back: text,
-                sourceContent: text,
-                deckName: category
-            });
-            alert(`Saved to ${category} flashcards!`);
+            await saveNewCard(msg.text, flashcardCategory);
+            setSavedIds((prev) => new Set(prev).add(msg.id));
         } catch (err) {
-            console.error("Failed to save flashcard", err);
-            alert("Failed to save flashcard");
+            console.error('Failed to save flashcard', err);
+        } finally {
+            setSavingId(null);
         }
     };
 
     return (
         <div className="flex h-full bg-[#0a0a0a]">
 
-            {/* Sidebar: History */}
+            {/* Sidebar */}
             <div className="w-64 shrink-0 bg-[#111111]/85 backdrop-blur-xl border-r border-zinc-800/60 hidden md:flex flex-col">
                 <div className="p-4 border-b border-zinc-800/60 space-y-3">
-                    <button onClick={createNewSession} className="w-full flex items-center justify-center gap-2 bg-[#5b4fff]/10 hover:bg-[#5b4fff]/20 text-[#968fff] border border-[#5b4fff]/20 py-2.5 rounded-xl text-sm font-medium transition-colors">
+                    <button
+                        onClick={createNewSession}
+                        className="w-full flex items-center justify-center gap-2 bg-[#5b4fff]/10 hover:bg-[#5b4fff]/20 text-[#968fff] border border-[#5b4fff]/20 py-2.5 rounded-xl text-sm font-medium transition-colors"
+                    >
                         <Plus className="w-4 h-4" /> New Chat
                     </button>
 
@@ -205,6 +240,7 @@ const ChatPage: React.FC = () => {
                         />
                     </div>
                 </div>
+
                 <div className="flex-1 overflow-y-auto p-3 space-y-1">
                     <p className="px-2 text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2 mt-2">Recent</p>
                     {historySessions.length === 0 ? (
@@ -215,13 +251,13 @@ const ChatPage: React.FC = () => {
                                 key={session.sessionId}
                                 onClick={() => void loadSession(session.sessionId)}
                                 className={`w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors ${
-                                    currentSessionId === session.sessionId ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+                                    currentSessionId === session.sessionId
+                                        ? 'bg-zinc-800 text-white'
+                                        : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
                                 }`}
                             >
                                 <MessageSquare className="w-4 h-4 shrink-0" />
-                                <div className="truncate flex-1">
-                                    <span className="truncate block">{session.title}</span>
-                                </div>
+                                <span className="truncate flex-1">{session.title}</span>
                             </button>
                         ))
                     )}
@@ -230,6 +266,7 @@ const ChatPage: React.FC = () => {
 
             {/* Main Chat Area */}
             <div className="flex flex-col flex-1 min-w-0">
+                {/* Header — category dropdown removed; it no longer affects AI responses */}
                 <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-zinc-800/60 bg-[#111111]/85 backdrop-blur-xl">
                     <div className="flex items-center gap-3">
                         <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-linear-to-br from-[#5b4fff]/20 to-[#968fff]/20 border border-[#5b4fff]/20">
@@ -239,15 +276,6 @@ const ChatPage: React.FC = () => {
                             <h2 className="text-lg font-semibold text-white tracking-tight">AI Assistant</h2>
                             <p className="text-xs text-zinc-500">Session: {currentSessionId.split('-')[0]}</p>
                         </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <label htmlFor="category-select" className="sr-only">Select Category</label>
-                        <select id="category-select" value={category} onChange={(e) => setCategory(e.target.value)} className="bg-[#1a1a1a] border border-zinc-800/80 text-zinc-300 text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#5b4fff]/50 transition-all">
-                            <option value="computer-science">Computer Science</option>
-                            <option value="mathematics">Mathematics</option>
-                            <option value="physics">Physics</option>
-                            <option value="general">General</option>
-                        </select>
                     </div>
                 </div>
 
@@ -265,9 +293,17 @@ const ChatPage: React.FC = () => {
 
                         {messages.map((msg) => (
                             <div key={msg.id} className={`flex gap-3 group ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                {msg.sender === 'ai' && <div className="shrink-0 w-8 h-8 rounded-lg bg-linear-to-br from-[#5b4fff]/20 to-[#968fff]/20 border border-[#5b4fff]/20 flex items-center justify-center mt-1"><Bot className="w-4 h-4 text-[#968fff]" /></div>}
+                                {msg.sender === 'ai' && (
+                                    <div className="shrink-0 w-8 h-8 rounded-lg bg-linear-to-br from-[#5b4fff]/20 to-[#968fff]/20 border border-[#5b4fff]/20 flex items-center justify-center mt-1">
+                                        <Bot className="w-4 h-4 text-[#968fff]" />
+                                    </div>
+                                )}
 
-                                <div className={`max-w-[75%] rounded-2xl px-4 py-3 shadow-lg relative ${msg.sender === 'user' ? 'bg-[#5b4fff] text-white rounded-br-md shadow-[#5b4fff]/10' : 'bg-[#1a1a1a] text-zinc-200 border border-zinc-800/50 rounded-bl-md shadow-black/20'}`}>
+                                <div className={`max-w-[75%] rounded-2xl px-4 py-3 shadow-lg relative ${
+                                    msg.sender === 'user'
+                                        ? 'bg-[#5b4fff] text-white rounded-br-md shadow-[#5b4fff]/10'
+                                        : 'bg-[#1a1a1a] text-zinc-200 border border-zinc-800/50 rounded-bl-md shadow-black/20'
+                                }`}>
                                     {msg.sender === 'ai' ? (
                                         <div className="prose prose-invert prose-sm max-w-none">
                                             <ReactMarkdown>{msg.text || (isStreaming && msg.text === '' ? '...' : '')}</ReactMarkdown>
@@ -276,19 +312,43 @@ const ChatPage: React.FC = () => {
                                         <p className="whitespace-pre-wrap">{msg.text}</p>
                                     )}
 
-                                    {/* Flashcard Save Button (appears on hover) */}
+                                    {/* Flashcard save button — shows deck picker inline */}
                                     {msg.sender === 'ai' && !isStreaming && msg.text && (
-                                        <button
-                                            onClick={() => handleSaveFlashcard(msg.text)}
-                                            className="absolute -right-10 top-2 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 bg-[#1a1a1a] border border-zinc-700 rounded-lg hover:bg-zinc-800 text-emerald-400"
-                                            title="Save as Flashcard"
-                                        >
-                                            <PlusCircle className="w-4 h-4" />
-                                        </button>
+                                        <div className="absolute -right-24 top-2 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-1 items-end">
+                                            {savedIds.has(msg.id) ? (
+                                                <span className="text-xs text-emerald-400 bg-[#1a1a1a] border border-zinc-700 rounded-lg px-2 py-1">Saved!</span>
+                                            ) : (
+                                                <>
+                                                    <select
+                                                        value={flashcardCategory}
+                                                        onChange={(e) => setFlashcardCategory(e.target.value)}
+                                                        className="text-xs bg-[#1a1a1a] border border-zinc-700 text-zinc-300 rounded-lg px-2 py-1 focus:outline-none"
+                                                        title="Choose flashcard deck"
+                                                    >
+                                                        <option value="computer-science">CS</option>
+                                                        <option value="mathematics">Math</option>
+                                                        <option value="physics">Physics</option>
+                                                        <option value="general">General</option>
+                                                    </select>
+                                                    <button
+                                                        onClick={() => handleSaveFlashcard(msg)}
+                                                        disabled={savingId === msg.id}
+                                                        className="p-1.5 bg-[#1a1a1a] border border-zinc-700 rounded-lg hover:bg-zinc-800 text-emerald-400 disabled:opacity-50"
+                                                        title="Save as flashcard"
+                                                    >
+                                                        <PlusCircle className="w-4 h-4" />
+                                                    </button>
+                                                </>
+                                            )}
+                                        </div>
                                     )}
                                 </div>
 
-                                {msg.sender === 'user' && <div className="shrink-0 w-8 h-8 rounded-lg bg-[#5b4fff]/20 border border-[#5b4fff]/20 flex items-center justify-center mt-1"><User className="w-4 h-4 text-[#b4afff]" /></div>}
+                                {msg.sender === 'user' && (
+                                    <div className="shrink-0 w-8 h-8 rounded-lg bg-[#5b4fff]/20 border border-[#5b4fff]/20 flex items-center justify-center mt-1">
+                                        <User className="w-4 h-4 text-[#b4afff]" />
+                                    </div>
+                                )}
                             </div>
                         ))}
                         <div ref={messagesEndRef} />
@@ -303,7 +363,7 @@ const ChatPage: React.FC = () => {
                             ref={inputRef}
                             value={input}
                             onChange={(e) => setInput(e.target.value)}
-                            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void handleSend(); }}}
+                            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void handleSend(); } }}
                             disabled={isStreaming}
                             placeholder="Ask a question..."
                             className="flex-1 bg-[#1a1a1a]/80 border border-zinc-800/80 text-white rounded-xl px-4 py-3 resize-none focus:outline-none focus:ring-1 focus:ring-[#5b4fff]/50 transition-all placeholder-zinc-500"

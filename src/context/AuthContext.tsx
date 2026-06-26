@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
 
 interface AuthState {
   token: string | null;
@@ -43,8 +43,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setToken(null);
   }, []);
 
+  // ✅ Fix: Cache the context value object reference to eliminate cascading application re-renders
+  const contextValue = useMemo(() => ({
+    token,
+    isAuthenticated: !!token,
+    login,
+    logout
+  }), [token, login, logout]);
+
   return (
-      <AuthContext.Provider value={{ token, isAuthenticated: !!token, login, logout }}>
+      <AuthContext.Provider value={contextValue}>
         {children}
       </AuthContext.Provider>
   );

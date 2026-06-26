@@ -1,6 +1,16 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import {MessageSquare, Upload, LogOut, BookOpen, Settings, ChevronLeft, ChevronRight, Layers} from 'lucide-react';
+import {
+  MessageSquare,
+  Upload,
+  LogOut,
+  BookOpen,
+  Settings,
+  ChevronLeft,
+  ChevronRight,
+  Layers,
+  BrainCircuit,
+} from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 interface SidebarProps {
@@ -44,15 +54,21 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
             <MessageSquare className="w-5 h-5 shrink-0" />
             {!collapsed && <span>Chat</span>}
           </NavLink>
-          <NavLink to="/upload" className={linkClass} title="Upload Documents">
+
+          <NavLink to="/upload" className={linkClass} title="Upload documents">
             <Upload className="w-5 h-5 shrink-0" />
-            {!collapsed && <span>Upload Documents</span>}
+            {!collapsed && <span>Upload documents</span>}
           </NavLink>
 
-          {/* NEW Feature Links */}
-          <NavLink to="/study" className={linkClass} title="Study Flashcards">
+          <NavLink to="/study" className={linkClass} title="Study flashcards">
             <Layers className="w-5 h-5 shrink-0" />
-            {!collapsed && <span>Study Deck</span>}
+            {!collapsed && <span>Study deck</span>}
+          </NavLink>
+
+          {/* Quiz link — lands on /quiz which shows a "select a document" prompt */}
+          <NavLink to="/quiz" className={linkClass} title="Quizzes">
+            <BrainCircuit className="w-5 h-5 shrink-0" />
+            {!collapsed && <span>Quizzes</span>}
           </NavLink>
 
           <NavLink to="/settings" className={linkClass} title="Settings">
@@ -66,17 +82,20 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
           <button
               onClick={handleLogout}
               className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-zinc-400 hover:text-red-400 hover:bg-red-500/10 transition-all w-full"
-              title="Sign Out"
+              title="Sign out"
           >
             <LogOut className="w-5 h-5 shrink-0" />
-            {!collapsed && <span>Sign Out</span>}
+            {!collapsed && <span>Sign out</span>}
           </button>
           <button
               onClick={onToggle}
               className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-all w-full"
-              title="Toggle Sidebar"
+              title="Toggle sidebar"
           >
-            {collapsed ? <ChevronRight className="w-5 h-5 shrink-0" /> : <ChevronLeft className="w-5 h-5 shrink-0" />}
+            {collapsed
+                ? <ChevronRight className="w-5 h-5 shrink-0" />
+                : <ChevronLeft className="w-5 h-5 shrink-0" />
+            }
             {!collapsed && <span>Collapse</span>}
           </button>
         </div>

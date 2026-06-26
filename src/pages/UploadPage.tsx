@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Upload,
   FileText,
@@ -11,63 +12,34 @@ import {
   File as FileIcon,
   Search,
   BrainCircuit,
-  BookType
+  BookType,
 } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
-import {
-  uploadDocument,
-  getDocumentHistory,
-  searchDocumentHistory,
-  generateSummary,
-  generateQuiz,
-  getSummary, // ✅ Imported getSummary
-  type DocumentHistoryDTO
-} from '../services/api';
+import { useDocuments } from '../hooks/useDocuments';
 
 const UploadPage: React.FC = () => {
-  const { token } = useAuth();
+  const navigate = useNavigate();
+  const { documents, loading: loadingHistory, error: fetchError, fetchDocuments, upload, triggerSummary, fetchSummary, triggerQuiz } = useDocuments();
+
   const [file, setFile] = useState<File | null>(null);
   const [category, setCategory] = useState('computer-science');
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
-
-  const [documents, setDocuments] = useState<DocumentHistoryDTO[]>([]);
-  const [loadingHistory, setLoadingHistory] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [refreshKey, setRefreshKey] = useState(0);
-
-  // State for the Summary Modal
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [activeSummary, setActiveSummary] = useState<string | null>(null);
+  const [actionStates, setActionStates] = useState<Record<number, 'summarising' | 'quizzing' | null>>({});
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Debounce search input
   useEffect(() => {
-    if (!token) return;
+    const id = setTimeout(() => setDebouncedSearch(searchQuery), 300);
+    return () => clearTimeout(id);
+  }, [searchQuery]);
 
-    let isMounted = true;
-
-    const fetchPromise = searchQuery.trim()
-        ? searchDocumentHistory(token, searchQuery, 0, 20)
-        : getDocumentHistory(token, 0, 20);
-
-    fetchPromise
-        .then((res) => {
-          if (isMounted) setDocuments(res.content);
-        })
-        .catch((err: unknown) => {
-          // ✅ Handled the error properly
-          console.error("Failed to fetch documents:", err instanceof Error ? err.message : String(err));
-        })
-        .finally(() => {
-          if (isMounted) setLoadingHistory(false);
-        });
-
-    return () => { isMounted = false; };
-  }, [token, refreshKey, searchQuery]);
-
-  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSearchQuery(e.target.value);
-  };
+  useEffect(() => {
+    void fetchDocuments(debouncedSearch);
+  }, [debouncedSearch, fetchDocuments]);
 
   const handleFile = useCallback((f: File | null | undefined) => {
     if (f?.type === 'application/pdf') {
@@ -84,16 +56,13 @@ const UploadPage: React.FC = () => {
   }, [handleFile]);
 
   const handleUpload = async () => {
-    if (!file || !token) return;
+    if (!file) return;
     setUploading(true);
     try {
-      await uploadDocument(token, file, category, `upload-${crypto.randomUUID()}`);
+      await upload(file, category);
       setFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
       setSearchQuery('');
-      // ✅ Trigger a refresh, which will automatically show the loading spinner via the useEffect
-      setLoadingHistory(true);
-      setRefreshKey((prev) => prev + 1);
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Upload failed');
     } finally {
@@ -101,36 +70,40 @@ const UploadPage: React.FC = () => {
     }
   };
 
+  const setActionState = (docId: number, state: 'summarising' | 'quizzing' | null) => {
+    setActionStates(prev => ({ ...prev, [docId]: state }));
+  };
+
   const handleGenerateSummary = async (docId: number) => {
-    if (!token) return;
+    setActionState(docId, 'summarising');
     try {
-      await generateSummary(token, docId);
-      alert('Summary generation started in the background!');
-    } catch (err: unknown) {
-      console.error(err); // ✅ Logged the error
-      alert('Failed to start summary generation');
+      await triggerSummary(docId);
+      alert('Summary generation started in the background.');
+    } catch {
+      alert('Failed to start summary generation.');
+    } finally {
+      setActionState(docId, null);
     }
   };
 
   const handleViewSummary = async (docId: number) => {
-    if (!token) return;
     try {
-      const summaryData = await getSummary(token, docId);
+      const summaryData = await fetchSummary(docId);
       setActiveSummary(summaryData.executiveSummary);
-    } catch (err: unknown) {
-      console.error(err); // ✅ Logged the error
-      alert("Summary not ready yet. Please generate it first.");
+    } catch {
+      alert('Summary not ready yet — generate it first.');
     }
   };
 
   const handleGenerateQuiz = async (docId: number) => {
-    if (!token) return;
+    setActionState(docId, 'quizzing');
     try {
-      await generateQuiz(token, docId);
-      alert('Quiz generated successfully! Check the study tab soon.');
-    } catch (err: unknown) {
-      console.error(err); // ✅ Logged the error
-      alert('Failed to generate quiz');
+      await triggerQuiz(docId);
+      // Navigate straight into the quiz for this document
+      navigate(`/quiz/${docId}`);
+    } catch {
+      alert('Failed to generate quiz.');
+      setActionState(docId, null);
     }
   };
 
@@ -149,6 +122,15 @@ const UploadPage: React.FC = () => {
     if (loadingHistory) {
       return <div className="p-8 text-center text-zinc-500 flex justify-center"><Loader2 className="w-6 h-6 animate-spin" /></div>;
     }
+    if (fetchError) {
+      return (
+          <div className="p-8 text-center text-red-400 flex flex-col items-center gap-2">
+            <AlertCircle className="w-5 h-5" />
+            <span className="text-sm">{fetchError}</span>
+            <button onClick={() => void fetchDocuments(debouncedSearch)} className="text-xs text-zinc-400 hover:text-white underline mt-1">Retry</button>
+          </div>
+      );
+    }
     if (documents.length === 0) {
       return <div className="p-8 text-center text-zinc-500">{searchQuery ? 'No documents match your search.' : 'No documents uploaded yet.'}</div>;
     }
@@ -157,7 +139,7 @@ const UploadPage: React.FC = () => {
         <table className="w-full text-left text-sm text-zinc-300">
           <thead className="bg-[#111111]/80 text-zinc-400 border-b border-zinc-800/50">
           <tr>
-            <th className="px-6 py-4 font-medium">File Name</th>
+            <th className="px-6 py-4 font-medium">File name</th>
             <th className="px-6 py-4 font-medium">Size</th>
             <th className="px-6 py-4 font-medium">Status</th>
             <th className="px-6 py-4 font-medium text-center">Uploaded</th>
@@ -165,53 +147,82 @@ const UploadPage: React.FC = () => {
           </tr>
           </thead>
           <tbody className="divide-y divide-zinc-800/50">
-          {documents.map((doc) => (
-              <tr key={doc.id} className="hover:bg-zinc-800/30 transition-colors">
-                <td className="px-6 py-4 flex items-center gap-3">
-                  <FileIcon className="w-4 h-4 text-zinc-500 shrink-0" />
-                  <span className="font-medium text-zinc-200 truncate max-w-50">{doc.fileName}</span>
-                </td>
-                <td className="px-6 py-4 text-zinc-400 whitespace-nowrap">{formatSize(doc.fileSize)}</td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  {doc.status === 'COMPLETED' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-950/50 text-emerald-400 text-xs font-medium border border-emerald-900/50"><CheckCircle2 className="w-3.5 h-3.5" /> Ready</span>}
-                  {doc.status === 'PROCESSING' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-950/50 text-amber-400 text-xs font-medium border border-amber-900/50"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Parsing</span>}
-                  {doc.status === 'FAILED' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-red-950/50 text-red-400 text-xs font-medium border border-red-900/50" title={doc.errorMessage}><AlertCircle className="w-3.5 h-3.5" /> Failed</span>}
-                </td>
-                <td className="px-6 py-4 text-zinc-400 whitespace-nowrap text-center">
-                  {new Date(doc.createdAt).toLocaleDateString()}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-right">
-                  {doc.status === 'COMPLETED' && (
-                      <div className="flex justify-end gap-2">
-                        <button
-                            onClick={() => handleGenerateSummary(doc.id)}
-                            className="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-300 transition-colors"
-                            title="Generate Summary"
+          {documents.map((doc) => {
+            const action = actionStates[doc.id] ?? null;
+            return (
+                <tr key={doc.id} className="hover:bg-zinc-800/30 transition-colors">
+                  <td className="px-6 py-4 flex items-center gap-3">
+                    <FileIcon className="w-4 h-4 text-zinc-500 shrink-0" />
+                    <span className="font-medium text-zinc-200 truncate max-w-50">{doc.fileName}</span>
+                  </td>
+                  <td className="px-6 py-4 text-zinc-400 whitespace-nowrap">{formatSize(doc.fileSize)}</td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    {doc.status === 'COMPLETED' && (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-950/50 text-emerald-400 text-xs font-medium border border-emerald-900/50">
+                                            <CheckCircle2 className="w-3.5 h-3.5" /> Ready
+                                        </span>
+                    )}
+                    {doc.status === 'PROCESSING' && (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-950/50 text-amber-400 text-xs font-medium border border-amber-900/50">
+                                            <Loader2 className="w-3.5 h-3.5 animate-spin" /> Parsing
+                                        </span>
+                    )}
+                    {doc.status === 'FAILED' && (
+                        <span
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-red-950/50 text-red-400 text-xs font-medium border border-red-900/50"
+                            title={doc.errorMessage}
                         >
-                          <BookType className="w-4 h-4" />
-                        </button>
+                                            <AlertCircle className="w-3.5 h-3.5" /> Failed
+                                        </span>
+                    )}
+                  </td>
+                  <td className="px-6 py-4 text-zinc-400 whitespace-nowrap text-center">
+                    {new Date(doc.createdAt).toLocaleDateString()}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-right">
+                    {doc.status === 'COMPLETED' && (
+                        <div className="flex justify-end gap-2">
+                          {/* Generate summary */}
+                          <button
+                              onClick={() => void handleGenerateSummary(doc.id)}
+                              disabled={action !== null}
+                              className="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-300 transition-colors disabled:opacity-40"
+                              title="Generate summary"
+                          >
+                            {action === 'summarising'
+                                ? <Loader2 className="w-4 h-4 animate-spin" />
+                                : <BookType className="w-4 h-4" />
+                            }
+                          </button>
 
-                        {/* ✅ NEW: Button to actually view the generated summary */}
-                        <button
-                            onClick={() => handleViewSummary(doc.id)}
-                            className="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-emerald-400 transition-colors"
-                            title="View Summary"
-                        >
-                          <Search className="w-4 h-4" />
-                        </button>
+                          {/* View summary */}
+                          <button
+                              onClick={() => void handleViewSummary(doc.id)}
+                              disabled={action !== null}
+                              className="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-emerald-400 transition-colors disabled:opacity-40"
+                              title="View summary"
+                          >
+                            <Search className="w-4 h-4" />
+                          </button>
 
-                        <button
-                            onClick={() => handleGenerateQuiz(doc.id)}
-                            className="p-2 bg-[#5b4fff]/20 hover:bg-[#5b4fff]/40 text-[#968fff] rounded-lg transition-colors border border-[#5b4fff]/30"
-                            title="Generate Quiz"
-                        >
-                          <BrainCircuit className="w-4 h-4" />
-                        </button>
-                      </div>
-                  )}
-                </td>
-              </tr>
-          ))}
+                          {/* Generate quiz → navigates to /quiz/:id */}
+                          <button
+                              onClick={() => void handleGenerateQuiz(doc.id)}
+                              disabled={action !== null}
+                              className="p-2 bg-[#5b4fff]/20 hover:bg-[#5b4fff]/40 text-[#968fff] rounded-lg transition-colors border border-[#5b4fff]/30 disabled:opacity-40"
+                              title="Generate and open quiz"
+                          >
+                            {action === 'quizzing'
+                                ? <Loader2 className="w-4 h-4 animate-spin" />
+                                : <BrainCircuit className="w-4 h-4" />
+                            }
+                          </button>
+                        </div>
+                    )}
+                  </td>
+                </tr>
+            );
+          })}
           </tbody>
         </table>
     );
@@ -220,6 +231,8 @@ const UploadPage: React.FC = () => {
   return (
       <div className="flex flex-col h-full bg-[#0a0a0a] overflow-y-auto relative">
         <div className="max-w-4xl mx-auto w-full px-4 py-8 space-y-8">
+
+          {/* Page header */}
           <div>
             <div className="flex items-center gap-3 mb-2">
               <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-linear-to-br from-[#5b4fff]/20 to-[#968fff]/20 border border-[#5b4fff]/20">
@@ -230,6 +243,7 @@ const UploadPage: React.FC = () => {
             <p className="text-zinc-400 ml-13">Upload PDFs to build your AI knowledge base. Documents are retained securely and isolated to your account.</p>
           </div>
 
+          {/* Upload panel */}
           <div className="bg-[#0a0a0a]/60 backdrop-blur-2xl border border-zinc-800/50 shadow-2xl rounded-2xl p-6 space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="md:col-span-1">
@@ -256,12 +270,24 @@ const UploadPage: React.FC = () => {
                     onClick={() => fileInputRef.current?.click()}
                     className={dropzoneClasses}
                 >
-                  <input ref={fileInputRef} type="file" accept=".pdf" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
+                  <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".pdf"
+                      className="hidden"
+                      onChange={(e) => handleFile(e.target.files?.[0])}
+                  />
                   {file ? (
                       <div className="flex flex-col items-center gap-2">
                         <FileText className="w-8 h-8 text-[#968fff]" />
                         <p className="text-white tracking-tight font-medium text-sm">{file.name}</p>
-                        <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setFile(null); }} className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1"><X className="w-3 h-3" /> Remove</button>
+                        <button
+                            type="button"
+                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setFile(null); }}
+                            className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1"
+                        >
+                          <X className="w-3 h-3" /> Remove
+                        </button>
                       </div>
                   ) : (
                       <div className="flex flex-col items-center gap-2">
@@ -273,50 +299,56 @@ const UploadPage: React.FC = () => {
               </div>
             </div>
 
-            <button onClick={() => void handleUpload()} disabled={!file || uploading} className="w-full flex items-center justify-center gap-2 bg-[#5b4fff] hover:bg-[#5b4fff]/90 text-white font-semibold py-3 rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed border border-[#968fff]/20 shadow-lg shadow-[#5b4fff]/10">
+            <button
+                onClick={() => void handleUpload()}
+                disabled={!file || uploading}
+                className="w-full flex items-center justify-center gap-2 bg-[#5b4fff] hover:bg-[#5b4fff]/90 text-white font-semibold py-3 rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed border border-[#968fff]/20 shadow-lg shadow-[#5b4fff]/10"
+            >
               {uploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <CloudUpload className="w-5 h-5" />}
-              {uploading ? 'Processing & Vectorizing...' : 'Upload to Knowledge Base'}
+              {uploading ? 'Processing & vectorising…' : 'Upload to knowledge base'}
             </button>
           </div>
 
+          {/* Document table */}
           <div>
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
               <h3 className="text-lg font-semibold text-white tracking-tight flex items-center gap-2">
-                <Clock className="w-5 h-5 text-zinc-400" /> Recent Uploads
+                <Clock className="w-5 h-5 text-zinc-400" /> Recent uploads
               </h3>
-
               <div className="relative w-full sm:w-64">
                 <label htmlFor="doc-search" className="sr-only">Search files</label>
                 <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                     id="doc-search"
                     type="text"
-                    placeholder="Search files..."
+                    placeholder="Search files…"
                     value={searchQuery}
-                    onChange={handleSearchChange}
+                    onChange={(e) => setSearchQuery(e.target.value)}
                     className="w-full bg-[#111111]/85 border border-zinc-800/60 text-sm text-zinc-100 rounded-lg pl-9 pr-4 py-2 focus:outline-none focus:ring-1 focus:ring-[#5b4fff]/50 placeholder-zinc-600"
                 />
               </div>
             </div>
-
             <div className="bg-[#0a0a0a]/60 backdrop-blur-2xl border border-zinc-800/50 shadow-2xl rounded-2xl overflow-hidden">
               {renderTableContent()}
             </div>
           </div>
         </div>
 
-        {/* ✅ NEW: Render Summary Modal if active */}
+        {/* Summary modal */}
         {activeSummary && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
               <div className="bg-[#111111] border border-zinc-800 rounded-2xl p-8 max-w-2xl w-full shadow-2xl relative">
-                <button onClick={() => setActiveSummary(null)} className="absolute top-4 right-4 text-zinc-500 hover:text-white transition-colors">
+                <button
+                    onClick={() => setActiveSummary(null)}
+                    className="absolute top-4 right-4 text-zinc-500 hover:text-white transition-colors"
+                >
                   <X className="w-5 h-5" />
                 </button>
                 <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-3">
                   <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-linear-to-br from-[#5b4fff]/20 to-[#968fff]/20 border border-[#5b4fff]/20">
                     <BookType className="w-4 h-4 text-[#968fff]" />
                   </div>
-                  Executive Summary
+                  Executive summary
                 </h3>
                 <div className="text-zinc-300 leading-relaxed text-sm whitespace-pre-wrap max-h-[60vh] overflow-y-auto pr-2">
                   {activeSummary}
@@ -324,7 +356,6 @@ const UploadPage: React.FC = () => {
               </div>
             </div>
         )}
-
       </div>
   );
 };
